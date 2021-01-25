@@ -25,11 +25,12 @@ class ToTensor(object):
         :param sample: tuple of three ndarrays
         :return: ndarrays converted to tensors
         """
-        x, y, indices, q = sample
+        x, y, indices, q, h = sample
         return torch.from_numpy(x).type(torch.float32), \
                 torch.from_numpy(y).type(torch.float32), \
                 torch.from_numpy(indices).type(torch.long), \
-                torch.from_numpy(q).type(torch.long)
+                torch.from_numpy(q).type(torch.long), \
+                torch.from_numpy(h).type(torch.float32) if h is not None else None
 
 
 class FixLength(object):
@@ -59,7 +60,7 @@ class FixLength(object):
         else:  # otherwise do the sampling
             fixed_len_x, fixed_len_y, indices, fixed_len_q = self._sample(sample, sample_size)
 
-        return fixed_len_x, fixed_len_y, indices, fixed_len_q
+        return fixed_len_x, fixed_len_y, indices, fixed_len_q, None
 
     def _sample(self, sample, sample_size):
         """
@@ -71,6 +72,7 @@ class FixLength(object):
             [sample_size, features_dim], [sample_size] and [sample_size]
         """
         indices = np.random.choice(sample_size, self.dim_given, replace=False)
+        indices.sort() # Always put top ranking items first.
         fixed_len_y = sample[1][indices]
         if fixed_len_y.sum() == 0:
             if sample[1].sum() == 1:
@@ -233,7 +235,44 @@ def load_libsvm_dataset_role(role: str, input_path: str, slate_length: int) -> L
     return ds
 
 
-def create_data_loaders(train_ds: LibSVMDataset, val_ds: LibSVMDataset, num_workers: int, batch_size: int):
+def default_collate(batch):
+    r"""Puts each data field into a tensor with outer dimension batch size"""
+
+    elem = batch[0]
+    elem_type = type(elem)
+    if isinstance(elem, torch.Tensor):
+        out = None
+        if torch.utils.data.get_worker_info() is not None:
+            # If we're in a background process, concatenate directly into a
+            # shared memory tensor to avoid an extra copy
+            numel = sum([x.numel() for x in batch])
+            storage = elem.storage()._new_shared(numel)
+            out = elem.new(storage)
+        return torch.stack(batch, 0, out=out)
+    elif isinstance(elem, (list, tuple)):
+        # check to make sure that the elements in batch have consistent size
+        it = iter(batch)
+        elem_size = len(next(it))
+        if not all(len(elem) == elem_size for elem in it):
+            raise RuntimeError('each element in list of batch should be of equal size')
+        transposed = zip(*batch)
+        return [default_collate(samples) for samples in transposed]
+    elif isinstance(elem, type(None)):
+        return batch
+
+    raise TypeError('Unsupported type {}'.format(elem_type))
+
+
+def build_collate(dstore):
+    def collate_batch(batch):
+        xb, yb, indices, qb, hb = default_collate(batch)
+        xb = dstore._load_in_collate(xb, qb)
+        out = xb, yb, indices, qb, hb
+        return out
+    return collate_batch
+
+
+def create_data_loaders(train_ds: LibSVMDataset, val_ds: LibSVMDataset, num_workers: int, batch_size: int, dstore=None):
     """
     Helper function creating train and validation data loaders with specified number of workers and batch sizes.
     :param train_ds: LibSVMDataset train dataset
@@ -248,6 +287,6 @@ def create_data_loaders(train_ds: LibSVMDataset, val_ds: LibSVMDataset, num_work
     logger.info("total batch size is {}".format(total_batch_size))
 
     # Please note that the batch size for validation dataloader is twice the total_batch_size
-    train_dl = DataLoader(train_ds, batch_size=total_batch_size, num_workers=num_workers, shuffle=True)
-    val_dl = DataLoader(val_ds, batch_size=total_batch_size * 2, num_workers=num_workers, shuffle=False)
+    train_dl = DataLoader(train_ds, batch_size=total_batch_size, num_workers=num_workers, collate_fn=build_collate(dstore), shuffle=True)
+    val_dl = DataLoader(val_ds, batch_size=total_batch_size * 2, num_workers=num_workers, collate_fn=build_collate(dstore), shuffle=False)
     return train_dl, val_dl

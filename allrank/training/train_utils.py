@@ -36,8 +36,7 @@ def metric_on_batch(metric, model, xb, yb, indices):
 
 def metric_on_epoch(metric, model, feature_func, dl, dev):
     lst = []
-    for xb, yb, indices, qb in dl:
-        xb = feature_func(xb, qb)
+    for xb, yb, indices in wrap_dl(dl, feature_func):
         val = metric_on_batch(metric, model, xb.to(device=dev), yb.to(device=dev), indices.to(device=dev))
         lst.append(val)
     metric_values = torch.mean(
@@ -76,9 +75,18 @@ def get_current_lr(optimizer):
         return param_group["lr"]
 
 
+def wrap_dl(dl, feature_func):
+    if feature_func.load_in_main_loop:
+        # TODO: Load many batches at once to amortize reads.
+        raise NotImplementedError
+    else:
+        for xb, yb, indices, qb, hb in dl:
+            xb = feature_func(xb, qb)
+            yield xb, yb, indices
+
+
 def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, valid_dl, config,
         gradient_clipping_norm, early_stopping_patience, device, output_dir, tensorboard_output_path):
-    epochs = 40
     tensorboard_summary_writer = TensorboardSummaryWriter(tensorboard_output_path)
 
     num_params = get_num_params(model)
@@ -94,8 +102,7 @@ def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, 
         # yb dim: [batch_size, slate_length]
 
         train_losses, train_nums = [], []
-        for xb, yb, indices, qb in train_dl:
-            xb = feature_func(xb, qb)
+        for xb, yb, indices in wrap_dl(train_dl, feature_func):
             loss, num = loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
                     gradient_clipping_norm, optimizer)
             train_losses.append(loss)
@@ -111,8 +118,7 @@ def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, 
         model.eval()
         with torch.no_grad():
             val_losses, val_nums = [], []
-            for xb, yb, indices, qb in valid_dl:
-                xb = feature_func(xb, qb)
+            for xb, yb, indices in wrap_dl(valid_dl, feature_func):
                 loss, num = loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
                         gradient_clipping_norm)
                 val_losses.append(loss)

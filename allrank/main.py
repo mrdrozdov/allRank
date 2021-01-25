@@ -32,28 +32,44 @@ def parse_args() -> Namespace:
 
 
 class Dstore:
-    def __init__(self, path, dstore_size=None, vec_size=None, enabled=False):
+    def __init__(self, path, dstore_size=None, vec_size=None, enabled=False, load_in_collate=False, load_in_main_loop=False, main_loop_batch=None):
         self.path = path
         self.dstore_size = dstore_size
         self.vec_size = vec_size
         self.enabled = enabled
+        self.load_in_collate = load_in_collate
+        self.load_in_main_loop = load_in_main_loop
+        self.load_in_call = not self.load_in_collate and not self.load_in_main_loop
+        self.main_loop_batch = main_loop_batch
         self._initialized = False
+
+        assert not (self.load_in_collate and self.load_in_main_loop), "Choose one."
 
     def initialize(self):
         self.keys = np.memmap(os.path.join(self.path, 'dstore_keys.npy'), dtype=np.float32, mode='r', shape=(self.dstore_size, self.vec_size))
         self._initialized = True
 
-    def __call__(self, xb, qb):
-        if not self.enabled:
-            return xb
-        if not self._initialized:
-            self.initialize()
+    def load(self, xb, qb):
         u, inv = np.unique(qb.cpu().numpy(), return_inverse=True)
         tmp = self.keys[u]
         tmp = tmp[inv]
         tmp = torch.from_numpy(tmp).view(qb.shape[0], qb.shape[1], self.vec_size)
         out = torch.cat([xb, tmp], -1)
         return out
+
+    def _load_in_collate(self, xb, qb):
+        if not self.enabled or not self.load_in_collate:
+            return xb
+        if not self._initialized:
+            self.initialize()
+        return self.load(xb, qb)
+
+    def __call__(self, xb, qb):
+        if not self.enabled or not self.load_in_call:
+            return xb
+        if not self._initialized:
+            self.initialize()
+        return self.load(xb, qb)
 
 
 def run():
@@ -88,12 +104,15 @@ def run():
     n_features = train_ds.shape[-1]
     assert n_features == val_ds.shape[-1], "Last dimensions of train_ds and val_ds do not match!"
 
+    # load dstore and use as feature func
+    dstore = Dstore(**config.dstore)
+    if dstore.enabled:
+        n_features += dstore.vec_size
+
     # train_dl, val_dl
     train_dl, val_dl = create_data_loaders(
-        train_ds, val_ds, num_workers=config.data.num_workers, batch_size=config.data.batch_size)
-
-    if config.dstore['enabled']:
-        n_features += config.dstore['vec_size']
+        train_ds, val_ds, num_workers=config.data.num_workers, batch_size=config.data.batch_size,
+        dstore=dstore)
 
     # gpu support
     dev = get_torch_device()
@@ -114,14 +133,11 @@ def run():
     else:
         scheduler = None
 
-    # load dstore and use as feature func
-    feature_func = Dstore(**config.dstore)
-
     with torch.autograd.detect_anomaly() if config.detect_anomaly else dummy_context_mgr():  # type: ignore
         # run training
         result = fit(
             model=model,
-            feature_func=feature_func,
+            feature_func=dstore,
             loss_func=loss_func,
             optimizer=optimizer,
             scheduler=scheduler,

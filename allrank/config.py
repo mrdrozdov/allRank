@@ -41,6 +41,9 @@ class DstoreConfig:
     dstore_size = attrib(type=int)
     vec_size = attrib(type=int)
     enabled = attrib(type=bool, default=False)
+    load_in_collate = attrib(type=bool, default=False)
+    load_in_main_loop = attrib(type=bool, default=False)
+    main_loop_batch = attrib(type=int, default=10)
 
 
 @attrs
