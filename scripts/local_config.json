@@ -21,7 +21,7 @@
     }
   },
   "data": {
-    "path": "/allrank/dummy_data",
+    "path": "./dummy_data",
     "validation_ds_role": "vali",
     "num_workers": 1,
     "batch_size": 64,

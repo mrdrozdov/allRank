@@ -36,6 +36,14 @@ class ModelConfig:
 
 
 @attrs
+class DstoreConfig:
+    path = attrib(type=str)
+    dstore_size = attrib(type=int)
+    vec_size = attrib(type=int)
+    enabled = attrib(type=bool, default=False)
+
+
+@attrs
 class PositionalEncoding:
     strategy = attrib(type=str)
     max_indices = attrib(type=int)
@@ -66,6 +74,7 @@ class NameArgsConfig:
 @attrs
 class Config:
     model = attrib(type=ModelConfig)
+    dstore = attrib(type=DstoreConfig)
     data = attrib(type=DataConfig)
     optimizer = attrib(type=NameArgsConfig)
     training = attrib(type=TrainingConfig)

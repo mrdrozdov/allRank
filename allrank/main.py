@@ -31,6 +31,31 @@ def parse_args() -> Namespace:
     return parser.parse_args()
 
 
+class Dstore:
+    def __init__(self, path, dstore_size=None, vec_size=None, enabled=False):
+        self.path = path
+        self.dstore_size = dstore_size
+        self.vec_size = vec_size
+        self.enabled = enabled
+        self._initialized = False
+
+    def initialize(self):
+        self.keys = np.memmap(os.path.join(self.path, 'dstore_keys.npy'), dtype=np.float32, mode='r', shape=(self.dstore_size, self.vec_size))
+        self._initialized = True
+
+    def __call__(self, xb, qb):
+        if not self.enabled:
+            return xb
+        if not self._initialized:
+            self.initialize()
+        u, inv = np.unique(qb.cpu().numpy(), return_inverse=True)
+        tmp = self.keys[u]
+        tmp = tmp[inv]
+        tmp = torch.from_numpy(tmp).view(qb.shape[0], qb.shape[1], self.vec_size)
+        out = torch.cat([xb, tmp], -1)
+        return out
+
+
 def run():
     # reproducibility
     torch.manual_seed(42)
@@ -67,6 +92,9 @@ def run():
     train_dl, val_dl = create_data_loaders(
         train_ds, val_ds, num_workers=config.data.num_workers, batch_size=config.data.batch_size)
 
+    if config.dstore['enabled']:
+        n_features += config.dstore['vec_size']
+
     # gpu support
     dev = get_torch_device()
     logger.info("Model training will execute on {}".format(dev.type))
@@ -86,10 +114,14 @@ def run():
     else:
         scheduler = None
 
+    # load dstore and use as feature func
+    feature_func = Dstore(**config.dstore)
+
     with torch.autograd.detect_anomaly() if config.detect_anomaly else dummy_context_mgr():  # type: ignore
         # run training
         result = fit(
             model=model,
+            feature_func=feature_func,
             loss_func=loss_func,
             optimizer=optimizer,
             scheduler=scheduler,

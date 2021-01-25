@@ -34,22 +34,23 @@ def metric_on_batch(metric, model, xb, yb, indices):
     return metric(model.score(xb, mask, indices), yb)
 
 
-def metric_on_epoch(metric, model, dl, dev):
+def metric_on_epoch(metric, model, feature_func, dl, dev):
+    lst = []
+    for xb, yb, indices, qb in dl:
+        xb = feature_func(xb, qb)
+        val = metric_on_batch(metric, model, xb.to(device=dev), yb.to(device=dev), indices.to(device=dev))
+        lst.append(val)
     metric_values = torch.mean(
-        torch.cat(
-            [metric_on_batch(metric, model, xb.to(device=dev), yb.to(device=dev), indices.to(device=dev))
-             for xb, yb, indices in dl]
-        ), dim=0
-    ).cpu().numpy()
+        torch.cat(lst), dim=0).cpu().numpy()
     return metric_values
 
 
-def compute_metrics(metrics, model, dl, dev):
+def compute_metrics(metrics, model, feature_func, dl, dev):
     metric_values_dict = {}
     for metric_name, ats in metrics.items():
         metric_func = getattr(metrics_module, metric_name)
         metric_func_with_ats = partial(metric_func, ats=ats)
-        metrics_values = metric_on_epoch(metric_func_with_ats, model, dl, dev)
+        metrics_values = metric_on_epoch(metric_func_with_ats, model, feature_func, dl, dev)
         metrics_names = ["{metric_name}_{at}".format(metric_name=metric_name, at=at) for at in ats]
         metric_values_dict.update(dict(zip(metrics_names, metrics_values)))
 
@@ -75,8 +76,9 @@ def get_current_lr(optimizer):
         return param_group["lr"]
 
 
-def fit(epochs, model, loss_func, optimizer, scheduler, train_dl, valid_dl, config,
+def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, valid_dl, config,
         gradient_clipping_norm, early_stopping_patience, device, output_dir, tensorboard_output_path):
+    epochs = 40
     tensorboard_summary_writer = TensorboardSummaryWriter(tensorboard_output_path)
 
     num_params = get_num_params(model)
@@ -91,20 +93,35 @@ def fit(epochs, model, loss_func, optimizer, scheduler, train_dl, valid_dl, conf
         # xb dim: [batch_size, slate_length, embedding_dim]
         # yb dim: [batch_size, slate_length]
 
-        train_losses, train_nums = zip(
-            *[loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
-                         gradient_clipping_norm, optimizer) for
-              xb, yb, indices in train_dl])
+        train_losses, train_nums = [], []
+        for xb, yb, indices, qb in train_dl:
+            xb = feature_func(xb, qb)
+            loss, num = loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
+                    gradient_clipping_norm, optimizer)
+            train_losses.append(loss)
+            train_nums.append(num)
+
+        #train_losses, train_nums = zip(
+        #    *[loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
+        #                 gradient_clipping_norm, optimizer) for
+        #      xb, yb, indices in train_dl])
         train_loss = np.sum(np.multiply(train_losses, train_nums)) / np.sum(train_nums)
-        train_metrics = compute_metrics(config.metrics, model, train_dl, device)
+        train_metrics = compute_metrics(config.metrics, model, feature_func, train_dl, device)
 
         model.eval()
         with torch.no_grad():
-            val_losses, val_nums = zip(
-                *[loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
-                             gradient_clipping_norm) for
-                  xb, yb, indices in valid_dl])
-            val_metrics = compute_metrics(config.metrics, model, valid_dl, device)
+            val_losses, val_nums = [], []
+            for xb, yb, indices, qb in valid_dl:
+                xb = feature_func(xb, qb)
+                loss, num = loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
+                        gradient_clipping_norm)
+                val_losses.append(loss)
+                val_nums.append(num)
+            #val_losses, val_nums = zip(
+            #    *[loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
+            #                 gradient_clipping_norm) for
+            #      xb, yb, indices in valid_dl])
+            val_metrics = compute_metrics(config.metrics, model, feature_func, valid_dl, device)
 
         val_loss = np.sum(np.multiply(val_losses, val_nums)) / np.sum(val_nums)
 

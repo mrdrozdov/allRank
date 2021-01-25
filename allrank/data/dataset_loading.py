@@ -25,8 +25,11 @@ class ToTensor(object):
         :param sample: tuple of three ndarrays
         :return: ndarrays converted to tensors
         """
-        x, y, indices = sample
-        return torch.from_numpy(x).type(torch.float32), torch.from_numpy(y).type(torch.float32), torch.from_numpy(indices).type(torch.long)
+        x, y, indices, q = sample
+        return torch.from_numpy(x).type(torch.float32), \
+                torch.from_numpy(y).type(torch.float32), \
+                torch.from_numpy(indices).type(torch.long), \
+                torch.from_numpy(q).type(torch.long)
 
 
 class FixLength(object):
@@ -52,11 +55,11 @@ class FixLength(object):
         """
         sample_size = len(sample[1])
         if sample_size < self.dim_given:  # when expected dimension is larger than number of observation in instance do the padding
-            fixed_len_x, fixed_len_y, indices = self._pad(sample, sample_size)
+            fixed_len_x, fixed_len_y, indices, fixed_len_q = self._pad(sample, sample_size)
         else:  # otherwise do the sampling
-            fixed_len_x, fixed_len_y, indices = self._sample(sample, sample_size)
+            fixed_len_x, fixed_len_y, indices, fixed_len_q = self._sample(sample, sample_size)
 
-        return fixed_len_x, fixed_len_y, indices
+        return fixed_len_x, fixed_len_y, indices, fixed_len_q
 
     def _sample(self, sample, sample_size):
         """
@@ -76,7 +79,8 @@ class FixLength(object):
             elif sample[1].sum() > 0:
                 return self._sample(sample, sample_size)
         fixed_len_x = sample[0][indices]
-        return fixed_len_x, fixed_len_y, indices
+        fixed_len_q = sample[2][indices]
+        return fixed_len_x, fixed_len_y, indices, fixed_len_q
 
     def _pad(self, sample, sample_size):
         """
@@ -89,8 +93,9 @@ class FixLength(object):
         """
         fixed_len_x = np.pad(sample[0], ((0, self.dim_given - sample_size), (0, 0)), "constant")
         fixed_len_y = np.pad(sample[1], (0, self.dim_given - sample_size), "constant", constant_values=PADDED_Y_VALUE)
+        fixed_len_q = np.pad(sample[2], (0, self.dim_given - sample_size), "constant", constant_values=PADDED_Y_VALUE)
         indices = np.pad(np.arange(0, sample_size), (0, self.dim_given - sample_size), "constant", constant_values=PADDED_INDEX_VALUE)
-        return fixed_len_x, fixed_len_y, indices
+        return fixed_len_x, fixed_len_y, indices, fixed_len_q
 
 
 class LibSVMDataset(Dataset):
@@ -110,6 +115,7 @@ class LibSVMDataset(Dataset):
 
         self.X_by_qid = np.split(X, groups)[:-1]
         self.y_by_qid = np.split(y, groups)[:-1]
+        self.q_by_qid = np.split(query_ids, groups)[:-1]
 
         self.longest_query_length = max([len(a) for a in self.X_by_qid])
 
@@ -144,8 +150,9 @@ class LibSVMDataset(Dataset):
         """
         X = self.X_by_qid[idx]
         y = self.y_by_qid[idx]
+        q = self.q_by_qid[idx]
 
-        sample = X, y
+        sample = X, y, q
 
         if self.transform:
             sample = self.transform(sample)

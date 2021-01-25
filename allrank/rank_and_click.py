@@ -80,10 +80,18 @@ def run():
         logger.info("Model training will be distributed to {} GPUs.".format(torch.cuda.device_count()))
     model.to(dev)
 
+    ranked_slates = rank_slates(datasets, model, config)
+
+    # save clickthrough datasets
+    for role, slates in ranked_slates.items():
+        write_to_libsvm_without_masked(os.path.join(paths.output_dir, f"{role}.txt"), *slates)
+
+    raise Exception('DONE')
+
+    import ipdb; ipdb.set_trace()
+
     assert config.click_model is not None, "click_model must be defined in config for this run"
     click_model = instantiate_from_recursive_name_args(name_args=config.click_model)
-
-    ranked_slates = rank_slates(datasets, model, config)
 
     clicked_slates = {role: click_on_slates(slates, click_model, include_empty=False) for role, slates in ranked_slates.items()}
 
