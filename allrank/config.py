@@ -44,6 +44,7 @@ class DstoreConfig:
     load_in_collate = attrib(type=bool, default=False)
     load_in_main_loop = attrib(type=bool, default=False)
     main_loop_batch = attrib(type=int, default=10)
+    load_xb = attrib(type=bool, default=False)
 
 
 @attrs

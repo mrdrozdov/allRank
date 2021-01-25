@@ -32,7 +32,7 @@ def parse_args() -> Namespace:
 
 
 class Dstore:
-    def __init__(self, path, dstore_size=None, vec_size=None, enabled=False, load_in_collate=False, load_in_main_loop=False, main_loop_batch=None):
+    def __init__(self, path, dstore_size=None, vec_size=None, enabled=False, load_in_collate=False, load_in_main_loop=False, main_loop_batch=None, load_xb=False):
         self.path = path
         self.dstore_size = dstore_size
         self.vec_size = vec_size
@@ -40,6 +40,7 @@ class Dstore:
         self.load_in_collate = load_in_collate
         self.load_in_main_loop = load_in_main_loop
         self.load_in_call = not self.load_in_collate and not self.load_in_main_loop
+        self.load_xb = load_xb
         self.main_loop_batch = main_loop_batch
         self._initialized = False
 
@@ -49,12 +50,18 @@ class Dstore:
         self.keys = np.memmap(os.path.join(self.path, 'dstore_keys.npy'), dtype=np.float32, mode='r', shape=(self.dstore_size, self.vec_size))
         self._initialized = True
 
-    def load(self, xb, qb):
-        u, inv = np.unique(qb.cpu().numpy(), return_inverse=True)
+    def load_from_memmap(self, idx):
+        u, inv = np.unique(idx.cpu().long().numpy(), return_inverse=True)
         tmp = self.keys[u]
         tmp = tmp[inv]
-        tmp = torch.from_numpy(tmp).view(qb.shape[0], qb.shape[1], self.vec_size)
-        out = torch.cat([xb, tmp], -1)
+        tmp = torch.from_numpy(tmp).view(idx.shape[0], idx.shape[1], self.vec_size)
+        return tmp
+
+    def load(self, xb, qb):
+        if self.load_xb:
+            xb = self.load_from_memmap(xb)
+        qb = self.load_from_memmap(qb)
+        out = torch.cat([xb, qb], -1)
         return out
 
     def _load_in_main_loop(self, xb, qb):
@@ -115,6 +122,8 @@ def run():
     dstore = Dstore(**config.dstore)
     if dstore.enabled:
         n_features += dstore.vec_size
+        if dstore.load_xb:
+            n_features += dstore.vec_size - 1
 
     # train_dl, val_dl
     train_dl, val_dl = create_data_loaders(
