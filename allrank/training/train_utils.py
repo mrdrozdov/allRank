@@ -17,7 +17,7 @@ logger = get_logger()
 
 def loss_batch(model, loss_func, xb, yb, indices, gradient_clipping_norm, opt=None):
     mask = (yb == PADDED_Y_VALUE)
-    loss = loss_func(model(xb, mask, indices), yb)
+    loss = loss_func(model(xb, mask, indices), yb, indices=indices)
 
     if opt is not None:
         loss.backward()
@@ -77,8 +77,28 @@ def get_current_lr(optimizer):
 
 def wrap_dl(dl, feature_func):
     if feature_func.load_in_main_loop:
-        # TODO: Load many batches at once to amortize reads.
-        raise NotImplementedError
+        def first_wrap(dl):
+            cache = []
+            for sample in dl:
+                cache.append(sample)
+                if len(cache) == feature_func.main_loop_batch:
+                    yield cache
+                    cache = []
+            if len(cache) > 0:
+                yield cache
+
+        def multi_batch(cache):
+            mxb, _, _, mqb, _ = zip(*cache)
+            new_xb = feature_func._load_in_main_loop(torch.cat(mxb, 0), torch.cat(mqb, 0))
+            new_mxb = torch.split(new_xb, mxb[0].shape[0], dim=0)
+            for xb, sample in zip(new_mxb, cache):
+                _, yb, indices, qb, hb = sample
+                yield xb, yb, indices
+
+        for cache in first_wrap(dl):
+            for out in multi_batch(cache):
+                yield out
+
     else:
         for xb, yb, indices, qb, hb in dl:
             xb = feature_func(xb, qb)

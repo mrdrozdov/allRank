@@ -57,6 +57,13 @@ class Dstore:
         out = torch.cat([xb, tmp], -1)
         return out
 
+    def _load_in_main_loop(self, xb, qb):
+        if not self.enabled or not self.load_in_main_loop:
+            return xb
+        if not self._initialized:
+            self.initialize()
+        return self.load(xb, qb)
+
     def _load_in_collate(self, xb, qb):
         if not self.enabled or not self.load_in_collate:
             return xb
