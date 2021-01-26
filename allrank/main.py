@@ -19,6 +19,7 @@ from attr import asdict
 from functools import partial
 from pprint import pformat
 from torch import optim
+import scipy
 
 
 def parse_args() -> Namespace:
@@ -32,7 +33,7 @@ def parse_args() -> Namespace:
 
 
 class Dstore:
-    def __init__(self, path, dstore_size=None, vec_size=None, enabled=False, load_in_collate=False, load_in_main_loop=False, main_loop_batch=None, load_xb=False):
+    def __init__(self, path, dstore_size=None, vec_size=None, enabled=False, load_in_collate=False, load_in_main_loop=False, main_loop_batch=None, load_xb=False, prefetch=False):
         self.path = path
         self.dstore_size = dstore_size
         self.vec_size = vec_size
@@ -42,6 +43,7 @@ class Dstore:
         self.load_in_call = not self.load_in_collate and not self.load_in_main_loop
         self.load_xb = load_xb
         self.main_loop_batch = main_loop_batch
+        self.prefetch = prefetch
         self._initialized = False
 
         assert not (self.load_in_collate and self.load_in_main_loop), "Choose one."
@@ -50,9 +52,30 @@ class Dstore:
         self.keys = np.memmap(os.path.join(self.path, 'dstore_keys.npy'), dtype=np.float32, mode='r', shape=(self.dstore_size, self.vec_size))
         self._initialized = True
 
+    def run_prefetch(self, dl_lst):
+        if not self._initialized:
+            self.initialize()
+        print('Run prefetch...')
+        unique_ids = set()
+        for dl in dl_lst:
+            for xb, yb, indices, qb, hb in dl:
+                unique_ids.update(np.unique(qb))
+                if self.load_xb:
+                    unique_ids.update(np.unique(xb.long()))
+
+        index = list(sorted(unique_ids))
+        fetched = self.keys[index]
+        sparse_keys = scipy.sparse.csr_matrix(self.keys.shape, dtype=self.keys.dtype)
+        sparse_keys[index] = fetched[:]
+        self.sparse_keys = sparse_keys
+        print('done.')
+
     def load_from_memmap(self, idx):
         u, inv = np.unique(idx.cpu().long().numpy(), return_inverse=True)
-        tmp = self.keys[u]
+        if self.prefetch:
+            tmp = self.sparse_keys[u].toarray()
+        else:
+            tmp = self.keys[u]
         tmp = tmp[inv]
         tmp = torch.from_numpy(tmp).view(idx.shape[0], idx.shape[1], self.vec_size)
         return tmp
@@ -129,6 +152,9 @@ def run():
     train_dl, val_dl = create_data_loaders(
         train_ds, val_ds, num_workers=config.data.num_workers, batch_size=config.data.batch_size,
         dstore=dstore)
+
+    if dstore.prefetch:
+        dstore.run_prefetch([train_dl, val_dl])
 
     # gpu support
     dev = get_torch_device()
