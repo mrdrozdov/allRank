@@ -75,7 +75,13 @@ def get_current_lr(optimizer):
         return param_group["lr"]
 
 
-def wrap_dl(dl, feature_func):
+def wrap_dl(dl, feature_func, return_all=False):
+    def res_func(sample):
+        if return_all:
+            return sample
+        else:
+            return sample[:3]
+
     if feature_func.load_in_main_loop:
         def first_wrap(dl):
             cache = []
@@ -91,9 +97,11 @@ def wrap_dl(dl, feature_func):
             mxb, _, _, mqb, _ = zip(*cache)
             new_xb = feature_func._load_in_main_loop(torch.cat(mxb, 0), torch.cat(mqb, 0))
             new_mxb = torch.split(new_xb, mxb[0].shape[0], dim=0)
-            for xb, sample in zip(new_mxb, cache):
+            for xb, old_xb, sample in zip(new_mxb, mxb, cache):
                 _, yb, indices, qb, hb = sample
-                yield xb, yb, indices
+                hb = old_xb
+                sample = xb, yb, indices, qb, hb
+                yield res_func(sample)
 
         for cache in first_wrap(dl):
             for out in multi_batch(cache):
@@ -101,8 +109,10 @@ def wrap_dl(dl, feature_func):
 
     else:
         for xb, yb, indices, qb, hb in dl:
+            hb = xb
             xb = feature_func(xb, qb)
-            yield xb, yb, indices
+            sample = xb, yb, indices, qb, hb
+            yield res_func(sample)
 
 
 def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, valid_dl, config,

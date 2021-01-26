@@ -1,7 +1,10 @@
 from typing import Tuple, Dict, List, Generator
+import collections
 
 import torch
 from torch.utils.data.dataloader import DataLoader
+
+from allrank.training.train_utils import wrap_dl
 
 import allrank.models.losses as losses
 from allrank.config import Config
@@ -11,8 +14,7 @@ from allrank.models.model import LTRModel
 from allrank.models.model_utils import get_torch_device
 
 
-def rank_slates(datasets: Dict[str, LibSVMDataset], model: LTRModel, config: Config) \
-        -> Dict[str, Tuple[torch.Tensor, torch.Tensor]]:
+def rank_slates(datasets, model: LTRModel, dstore, config: Config):
     """
     Ranks given datasets according to a given model
 
@@ -23,24 +25,30 @@ def rank_slates(datasets: Dict[str, LibSVMDataset], model: LTRModel, config: Con
         every dataset is a Tuple of torch.Tensor - storing X and y in the descending order of the scores.
     """
 
-    dataloaders = {role: __create_data_loader(ds, config) for role, ds in datasets.items()}
+    #dataloaders = {role: __create_data_loader(ds, config) for role, ds in datasets.items()}
+    dataloaders = datasets
 
-    ranked_slates = {role: __rank_slates(dl, model) for role, dl in dataloaders.items()}
+    ranked_slates = {role: __rank_slates(dl, model, dstore) for role, dl in dataloaders.items()}
 
     return ranked_slates
 
 
-def __create_data_loader(ds: LibSVMDataset, config: Config) -> DataLoader:
-    return DataLoader(ds, batch_size=config.data.batch_size, num_workers=config.data.num_workers, shuffle=False)
+#def __create_data_loader(ds: LibSVMDataset, config: Config) -> DataLoader:
+#    return DataLoader(ds, batch_size=config.data.batch_size, num_workers=config.data.num_workers, shuffle=False)
 
 
-def __rank_slates(dataloader: DataLoader, model: LTRModel) -> Tuple[torch.Tensor, torch.Tensor]:
+def __rank_slates(dataloader: DataLoader, model: LTRModel, dstore):
     reranked_X = []
     reranked_y = []
     model.eval()
     device = get_torch_device()
+
+    out = collections.defaultdict(list)
+
     with torch.no_grad():
-        for xb, yb, _ in dataloader:
+        for xb, yb, indices, qb, hb in wrap_dl(dataloader, dstore, return_all=True):
+
+            rank = indices.to(device=device)
             X = xb.type(torch.float32).to(device=device)
             y_true = yb.to(device=device)
 
@@ -52,12 +60,17 @@ def __rank_slates(dataloader: DataLoader, model: LTRModel) -> Tuple[torch.Tensor
 
             _, indices = scores.sort(descending=True, dim=-1)
             indices_X = torch.unsqueeze(indices, -1).repeat_interleave(X.shape[-1], -1)
-            reranked_X.append(torch.gather(X, dim=1, index=indices_X).cpu())
-            reranked_y.append(torch.gather(y_true, dim=1, index=indices).cpu())
+            res_x = torch.gather(X, dim=1, index=indices_X).cpu()
+            res_y = torch.gather(y_true, dim=1, index=indices).cpu()
+            res_rank = torch.gather(rank, dim=1, index=indices).cpu()
 
-    combined_X = torch.cat(reranked_X)
-    combined_y = torch.cat(reranked_y)
-    return combined_X, combined_y
+            out['feat'].append(res_x)
+            out['rank'].append(res_rank)
+            out['label'].append(res_y)
+            out['qid'].append(qb)
+            out['kid'].append(hb)
+
+    return out
 
 
 def __clicked_ndcg(ordered_clicks: List[int]) -> float:

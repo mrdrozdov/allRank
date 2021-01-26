@@ -6,6 +6,24 @@ from sklearn.datasets import dump_svmlight_file
 from allrank.data.dataset_loading import PADDED_Y_VALUE
 
 
+def write_out(path, out):
+    with open(path, 'w') as f:
+        cur_qid = None
+        for rank_lst, label_lst, qid_lst, kid_lst in zip(
+            out['rank'], out['label'], out['qid'], out['kid']):
+
+            rank_lst = rank_lst.view(-1).long().tolist()
+            label_lst = label_lst.view(-1).long().tolist()
+            qid_lst = qid_lst.view(-1).long().tolist()
+            kid_lst = kid_lst.view(-1).long().tolist()
+
+            for r, l, q, k in zip(rank_lst, label_lst, qid_lst, kid_lst):
+                if cur_qid is not None and cur_qid != q:
+                    f.write('\n')
+                f.write('{} qid:{} key_id={} rank={}\n'.format(l, q, k, r))
+                cur_qid = q
+
+
 def write_to_libsvm_without_masked(path: str, X: Iterable[np.ndarray], y: Iterable[np.ndarray]) -> None:
     """
     This function writes given X's and y's in svmlight / libsvm file format.

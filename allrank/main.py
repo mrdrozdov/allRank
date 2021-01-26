@@ -1,4 +1,7 @@
 from urllib.parse import urlparse
+import hashlib
+
+from tqdm import tqdm
 
 import allrank.models.losses as losses
 import numpy as np
@@ -64,7 +67,32 @@ class Dstore:
                     unique_ids.update(np.unique(xb.long()))
 
         index = list(sorted(unique_ids))
-        fetched = self.keys[index]
+
+        m = hashlib.sha256()
+        m.update(str.encode('v0.0.1'))
+        for x in index:
+            m.update(str.encode('{}'.format(x)))
+        data_hash = m.hexdigest()
+
+        cache_path = os.path.join(self.path, '{}.cache.npy'.format(data_hash))
+        if not os.path.exists(cache_path):
+            print('build cache and save to {}'.format(cache_path))
+            bsz = 100
+            nbatches = len(index) // bsz
+            if nbatches * bsz < len(index):
+                nbatches += 1
+            fetched = []
+            for i in tqdm(range(nbatches)):
+                start = i * bsz
+                end = min(start + bsz, len(index))
+                local_index = index[start:end]
+                fetched.append(self.keys[local_index])
+            fetched = np.concatenate(fetched, axis=0)
+            np.save(cache_path, fetched)
+        else:
+            print('read cache from {}'.format(cache_path))
+            fetched = np.load(cache_path)
+
         sparse_keys = scipy.sparse.csr_matrix(self.keys.shape, dtype=self.keys.dtype)
         sparse_keys[index] = fetched[:]
         self.sparse_keys = sparse_keys

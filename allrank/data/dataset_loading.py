@@ -272,6 +272,14 @@ def build_collate(dstore):
     return collate_batch
 
 
+def make_dataloader(ds, num_workers, batch_size, dstore=None, shuffle=False):
+    gpu_count = torch.cuda.device_count()
+    total_batch_size = max(1, gpu_count) * batch_size
+    logger.info("total batch size is {}".format(total_batch_size))
+    dl = DataLoader(ds, batch_size=total_batch_size, num_workers=num_workers, collate_fn=build_collate(dstore), shuffle=shuffle)
+    return dl
+
+
 def create_data_loaders(train_ds: LibSVMDataset, val_ds: LibSVMDataset, num_workers: int, batch_size: int, dstore=None):
     """
     Helper function creating train and validation data loaders with specified number of workers and batch sizes.

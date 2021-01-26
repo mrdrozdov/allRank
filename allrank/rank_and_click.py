@@ -8,10 +8,12 @@ import pandas as pd
 import torch
 from attr import asdict
 
+from allrank.main import Dstore
+
 from allrank.click_models.click_utils import click_on_slates
 from allrank.config import Config
-from allrank.data.dataset_loading import load_libsvm_dataset_role
-from allrank.data.dataset_saving import write_to_libsvm_without_masked
+from allrank.data.dataset_loading import load_libsvm_dataset_role, make_dataloader, create_data_loaders, load_libsvm_dataset
+from allrank.data.dataset_saving import write_to_libsvm_without_masked, write_out
 from allrank.inference.inference_utils import rank_slates, metrics_on_clicked_slates
 from allrank.models.model import make_model
 from allrank.models.model_utils import get_torch_device, CustomDataParallel, load_state_dict_from_file
@@ -64,13 +66,43 @@ def run():
 
     n_features = [ds.shape[-1] for ds in datasets.values()]
     assert all_equal(n_features), f"Last dimensions of datasets must match but got {n_features}"
+    n_features = n_features[0]
+
+    # load dstore and use as feature func
+    dstore = Dstore(**config.dstore)
+    if dstore.enabled:
+        n_features += dstore.vec_size
+        if dstore.load_xb:
+            n_features += dstore.vec_size - 1
+
+    train_ds, val_ds = load_libsvm_dataset(
+        input_path=config.data.path,
+        slate_length=config.data.slate_length,
+        validation_ds_role=config.data.validation_ds_role,
+    )
+
+    train_dl, val_dl = create_data_loaders(
+        train_ds, val_ds, num_workers=config.data.num_workers, batch_size=config.data.batch_size,
+        dstore=dstore)
+
+    if dstore.prefetch:
+        dstore.run_prefetch([train_dl, val_dl])
+    del train_ds
+    del val_ds
+    del train_dl
+    del val_dl
+
+    datasets = {role: make_dataloader(ds,
+        num_workers=config.data.num_workers,
+        batch_size=config.data.batch_size,
+        dstore=dstore) for role, ds in datasets.items()}
 
     # gpu support
     dev = get_torch_device()
     logger.info("Will use device {}".format(dev.type))
 
     # instantiate model
-    model = make_model(n_features=n_features[0], **asdict(config.model, recurse=False))
+    model = make_model(n_features=n_features, **asdict(config.model, recurse=False))
 
     model.load_state_dict(load_state_dict_from_file(args.input_model_path, dev))
     logger.info(f"loaded model weights from {args.input_model_path}")
@@ -80,37 +112,13 @@ def run():
         logger.info("Model training will be distributed to {} GPUs.".format(torch.cuda.device_count()))
     model.to(dev)
 
-    ranked_slates = rank_slates(datasets, model, config)
+    ranked_slates = rank_slates(datasets, model, dstore, config)
 
     # save clickthrough datasets
-    for role, slates in ranked_slates.items():
-        write_to_libsvm_without_masked(os.path.join(paths.output_dir, f"{role}.txt"), *slates)
+    for role, out in ranked_slates.items():
+        write_out(os.path.join(paths.output_dir, f"{role}.txt"), out)
 
-    raise Exception('DONE')
-
-    import ipdb; ipdb.set_trace()
-
-    assert config.click_model is not None, "click_model must be defined in config for this run"
-    click_model = instantiate_from_recursive_name_args(name_args=config.click_model)
-
-    clicked_slates = {role: click_on_slates(slates, click_model, include_empty=False) for role, slates in ranked_slates.items()}
-
-    # save clickthrough datasets
-    for role, slates in clicked_slates.items():
-        write_to_libsvm_without_masked(os.path.join(paths.output_dir, f"{role}.txt"), *slates)
-
-    # calculate metrics
-    metered_slates = {role: metrics_on_clicked_slates(slates) for role, slates in clicked_slates.items()}
-
-    for role, metrics in metered_slates.items():
-        metrics_df = pd.DataFrame(metrics)
-        logger.info(f"{role} metrics summary:")
-        logger.info(metrics_df.mean())
-        metrics_df.to_csv(os.path.join(paths.output_dir, f"{role}_metrics.csv"), index=False)
-        pd.DataFrame(metrics_df.mean()).T.to_csv(os.path.join(paths.output_dir, f"{role}_metrics_mean.csv"), index=False)
-
-    if urlparse(args.job_dir).scheme == "gs":
-        copy_local_to_gs(paths.local_base_output_path, args.job_dir)
+    print('DONE')
 
 
 if __name__ == "__main__":
