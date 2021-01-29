@@ -5,7 +5,7 @@ from allrank.data.dataset_loading import PADDED_Y_VALUE
 from allrank.models.model_utils import get_torch_device
 
 
-def bce(y_pred, y_true, padded_value_indicator=PADDED_Y_VALUE):
+def bce(y_pred, y_true, indices=None, padded_value_indicator=PADDED_Y_VALUE):
     """
     Binary Cross-Entropy loss.
     :param y_pred: predictions from the model, shape [batch_size, slate_length]

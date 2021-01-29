@@ -162,6 +162,8 @@ def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, 
         val_loss = np.sum(np.multiply(val_losses, val_nums)) / np.sum(val_nums)
 
         tensorboard_metrics_dict = {("train", "loss"): train_loss, ("val", "loss"): val_loss}
+        if config.log['save_every_epoch']:
+            torch.save(model.state_dict(), os.path.join(output_dir, "model-epoch{}.pkl".format(epoch)))
 
         train_metrics_to_tb = {("train", name): value for name, value in train_metrics.items()}
         tensorboard_metrics_dict.update(train_metrics_to_tb)

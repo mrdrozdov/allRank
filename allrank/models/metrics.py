@@ -4,6 +4,34 @@ import torch
 from allrank.data.dataset_loading import PADDED_Y_VALUE
 
 
+def prefix(y_pred, y_true, ats=None, gain_function=lambda x: torch.pow(2, x) - 1, padding_indicator=PADDED_Y_VALUE):
+    """
+    Normalized Discounted Cumulative Gain at k.
+
+    Compute NDCG at ranks given by ats or at the maximum rank if ats is None.
+    :param y_pred: predictions from the model, shape [batch_size, slate_length]
+    :param y_true: ground truth labels, shape [batch_size, slate_length]
+    :param ats: optional list of ranks for NDCG evaluation, if None, maximum rank is used
+    :param gain_function: callable, gain function for the ground truth labels, e.g. torch.pow(2, x) - 1
+    :param padding_indicator: an indicator of the y_true index containing a padded item, e.g. -1
+    :return: NDCG values for each slate and rank passed, shape [batch_size, len(ats)]
+    """
+    y_pred, y_true = y_pred.detach(), y_true.detach()
+    assert len(ats) == 1
+    order = y_pred.cpu().numpy().argsort(axis=1)[:, ::-1]
+
+    prefix = []
+    for k in ats:
+        prefix_ = np.take_along_axis(y_true.cpu().numpy(), order, axis=1)[:, :k].mean(axis=1)
+        prefix_ = torch.from_numpy(prefix_).to(device=y_true.device).view(-1, 1)
+        prefix.append(prefix_)
+    prefix = torch.cat(prefix, dim=1)
+
+    assert (prefix < 0.0).sum() >= 0, "every ndcg should be non-negative"
+
+    return prefix
+
+
 def ndcg(y_pred, y_true, ats=None, gain_function=lambda x: torch.pow(2, x) - 1, padding_indicator=PADDED_Y_VALUE):
     """
     Normalized Discounted Cumulative Gain at k.

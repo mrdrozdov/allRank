@@ -12,7 +12,7 @@ def find_max_length(y_true, pad):
     return (y_true.shape[-1] - (y_true == pad).sum(-1)).max().item()
 
 
-def new_pairwise(y_pred, y_true, indices=None, num_samples=-1, padded_value_indicator=PADDED_Y_VALUE):
+def new_pairwise(y_pred, y_true, indices=None, num_samples=-1, padded_value_indicator=PADDED_Y_VALUE, margin=1):
     """
     Pointwise RMSE loss.
     :param y_pred: predictions from the model, shape [batch_size, slate_length]
@@ -35,11 +35,14 @@ def new_pairwise(y_pred, y_true, indices=None, num_samples=-1, padded_value_indi
         #y_rank = torch.arange(max_length).to(device).float()
         y_rank = indices[i].float()
 
+        mask = _y_true[index[:, 0]] != _y_true[index[:, 1]]
+        index = index[mask]
+
         y_i = _y_pred[index[:, 0]]
         y_i_rank = y_rank[index[:, 0]]
         y_j = _y_pred[index[:, 1]]
         y_j_rank = y_rank[index[:, 1]]
-        loss.append(hinge_loss(y_i, y_i_rank, y_j, y_j_rank, margin=1))
+        loss.append(hinge_loss(y_i, y_i_rank, y_j, y_j_rank, margin=margin))
 
     loss = torch.cat(loss).mean()
 

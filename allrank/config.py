@@ -64,6 +64,11 @@ class DataConfig:
 
 
 @attrs
+class LogConfig:
+    save_every_epoch = attrib(type=bool, default=False)
+
+
+@attrs
 class TrainingConfig:
     epochs = attrib(type=int)
     gradient_clipping_norm = attrib(type=float)
@@ -80,6 +85,7 @@ class NameArgsConfig:
 class Config:
     model = attrib(type=ModelConfig)
     dstore = attrib(type=DstoreConfig)
+    log = attrib(type=LogConfig)
     data = attrib(type=DataConfig)
     optimizer = attrib(type=NameArgsConfig)
     training = attrib(type=TrainingConfig)
