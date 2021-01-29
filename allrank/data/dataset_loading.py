@@ -266,7 +266,6 @@ def default_collate(batch):
 def build_collate(dstore):
     def collate_batch(batch):
         xb, yb, indices, qb, hb = default_collate(batch)
-        xb = dstore._load_in_collate(xb, qb)
         out = xb, yb, indices, qb, hb
         return out
     return collate_batch

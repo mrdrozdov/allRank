@@ -45,9 +45,6 @@ class Dstore:
         self.q_dstore_size = q_dstore_size
         self.vec_size = vec_size
         self.enabled = enabled
-        self.load_in_collate = load_in_collate
-        self.load_in_main_loop = load_in_main_loop
-        self.load_in_call = not self.load_in_collate and not self.load_in_main_loop
         self.load_xb = load_xb
         self.main_loop_batch = main_loop_batch
         self.prefetch = prefetch
@@ -56,8 +53,6 @@ class Dstore:
             self.vocab = Dictionary()
             self.vocab.add_from_file(vocab)
             self.vocab.finalize()
-
-        assert not (self.load_in_collate and self.load_in_main_loop), "Choose one."
 
     def initialize(self):
         self.keys = np.memmap(os.path.join(self.path, 'dstore_keys.npy'), dtype=np.float32, mode='r', shape=(self.dstore_size, self.vec_size))
@@ -102,6 +97,7 @@ class Dstore:
         unique_ids_q = set()
         for dl in dl_lst:
             for xb, yb, indices, qb, hb in dl:
+                xb = torch.chunk(xb.long(), 4, dim=2)[0]
                 unique_ids_q.update(np.unique(qb))
                 unique_ids_x.update(np.unique(xb.long()))
 
@@ -150,31 +146,17 @@ class Dstore:
         return tmp
 
     def load(self, xb, qb):
-        xb = self.load_from_memmap(xb, feat_type='x')
+        x_id, q_src, q_tgt, x_tgt = torch.chunk(xb.long(), 4, dim=2)
+        xb = self.load_from_memmap(x_id, feat_type='x')
         qb = self.load_from_memmap(qb, feat_type='q')
         out = torch.cat([xb, qb], -1)
         return out
 
     def _load_in_main_loop(self, xb, qb):
-        if not self.enabled or not self.load_in_main_loop:
-            return xb
         if not self._initialized:
             self.initialize()
         return self.load(xb, qb)
 
-    def _load_in_collate(self, xb, qb):
-        if not self.enabled or not self.load_in_collate:
-            return xb
-        if not self._initialized:
-            self.initialize()
-        return self.load(xb, qb)
-
-    def __call__(self, xb, qb):
-        if not self.enabled or not self.load_in_call:
-            return xb
-        if not self._initialized:
-            self.initialize()
-        return self.load(xb, qb)
 
 class Dictionary(object):
     """
@@ -389,8 +371,12 @@ def run():
     # load dstore and use as feature func
     dstore = Dstore(**config.dstore)
     if dstore.enabled:
-        n_features += dstore.vec_size
-        n_features += dstore.vec_size - 1 # load xb
+        n_features += dstore.vec_size # query vector
+        n_features += dstore.vec_size # key vector
+        n_features -= 1 # key id
+        n_features -= 1 # query src
+        n_features -= 1 # query tgt
+        n_features -= 1 # key tgt
 
     # train_dl, val_dl
     train_dl, val_dl = create_data_loaders(

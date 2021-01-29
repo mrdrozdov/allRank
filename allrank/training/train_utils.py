@@ -82,37 +82,29 @@ def wrap_dl(dl, feature_func, return_all=False):
         else:
             return sample[:3]
 
-    if feature_func.load_in_main_loop:
-        def first_wrap(dl):
-            cache = []
-            for sample in dl:
-                cache.append(sample)
-                if len(cache) == feature_func.main_loop_batch:
-                    yield cache
-                    cache = []
-            if len(cache) > 0:
+    def first_wrap(dl):
+        cache = []
+        for sample in dl:
+            cache.append(sample)
+            if len(cache) == feature_func.main_loop_batch:
                 yield cache
+                cache = []
+        if len(cache) > 0:
+            yield cache
 
-        def multi_batch(cache):
-            mxb, _, _, mqb, _ = zip(*cache)
-            new_xb = feature_func._load_in_main_loop(torch.cat(mxb, 0), torch.cat(mqb, 0))
-            new_mxb = torch.split(new_xb, mxb[0].shape[0], dim=0)
-            for xb, old_xb, sample in zip(new_mxb, mxb, cache):
-                _, yb, indices, qb, hb = sample
-                hb = old_xb
-                sample = xb, yb, indices, qb, hb
-                yield res_func(sample)
-
-        for cache in first_wrap(dl):
-            for out in multi_batch(cache):
-                yield out
-
-    else:
-        for xb, yb, indices, qb, hb in dl:
-            hb = xb
-            xb = feature_func(xb, qb)
+    def multi_batch(cache):
+        mxb, _, _, mqb, _ = zip(*cache)
+        new_xb = feature_func._load_in_main_loop(torch.cat(mxb, 0), torch.cat(mqb, 0))
+        new_mxb = torch.split(new_xb, mxb[0].shape[0], dim=0)
+        for xb, old_xb, sample in zip(new_mxb, mxb, cache):
+            _, yb, indices, qb, hb = sample
+            hb = old_xb
             sample = xb, yb, indices, qb, hb
             yield res_func(sample)
+
+    for cache in first_wrap(dl):
+        for out in multi_batch(cache):
+            yield out
 
 
 def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, valid_dl, config,
