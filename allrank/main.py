@@ -53,11 +53,26 @@ class Dstore:
             self.vocab = Dictionary()
             self.vocab.add_from_file(vocab)
             self.vocab.finalize()
+            print('Found vocab with size {} at path {}'.format(len(self.vocab), vocab))
 
     def initialize(self):
         self.keys = np.memmap(os.path.join(self.path, 'dstore_keys.npy'), dtype=np.float32, mode='r', shape=(self.dstore_size, self.vec_size))
         self.q_keys = np.memmap(os.path.join(self.q_path, 'dstore_keys.npy'), dtype=np.float32, mode='r', shape=(self.q_dstore_size, self.vec_size))
         self._initialized = True
+
+    def get_n_features(self, n_features, config):
+        if self.enabled:
+            n_features += self.vec_size # query vector
+            n_features += self.vec_size # key vector
+            n_features -= 1 # key id
+            n_features -= 1 # query src
+            n_features -= 1 # query tgt
+            n_features -= 1 # key tgt
+        if config.model.fc_model['embed_q_src']:
+            n_features += config.model.fc_model['embed_size']
+        if config.model.fc_model['embed_x_tgt']:
+            n_features += config.model.fc_model['embed_size']
+        return n_features
 
     def load_fetch(self, path, keys, index):
         index = list(sorted(index))
@@ -149,7 +164,7 @@ class Dstore:
         x_id, q_src, q_tgt, x_tgt = torch.chunk(xb.long(), 4, dim=2)
         xb = self.load_from_memmap(x_id, feat_type='x')
         qb = self.load_from_memmap(qb, feat_type='q')
-        out = torch.cat([xb, qb], -1)
+        out = torch.cat([xb, qb, q_src.float(), x_tgt.float()], -1)
         return out
 
     def _load_in_main_loop(self, xb, qb):
@@ -370,13 +385,7 @@ def run():
 
     # load dstore and use as feature func
     dstore = Dstore(**config.dstore)
-    if dstore.enabled:
-        n_features += dstore.vec_size # query vector
-        n_features += dstore.vec_size # key vector
-        n_features -= 1 # key id
-        n_features -= 1 # query src
-        n_features -= 1 # query tgt
-        n_features -= 1 # key tgt
+    n_features = dstore.get_n_features(n_features, config)
 
     # train_dl, val_dl
     train_dl, val_dl = create_data_loaders(
@@ -391,7 +400,7 @@ def run():
     logger.info("Model training will execute on {}".format(dev.type))
 
     # instantiate model
-    model = make_model(n_features=n_features, **asdict(config.model, recurse=False))
+    model = make_model(n_features=n_features, dstore=dstore, **asdict(config.model, recurse=False))
     if torch.cuda.device_count() > 1:
         model = CustomDataParallel(model)
         logger.info("Model training will be distributed to {} GPUs.".format(torch.cuda.device_count()))

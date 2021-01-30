@@ -47,28 +47,29 @@ def __rank_slates(dataloader: DataLoader, model: LTRModel, dstore):
 
     with torch.no_grad():
         for xb, yb, indices, qb, hb in wrap_dl(dataloader, dstore, return_all=True):
-
+            q_src = xb[:, :, -2].long().to(device)
+            x_tgt = xb[:, :, -1].long().to(device)
             rank = indices.to(device=device)
-            X = xb.type(torch.float32).to(device=device)
             y_true = yb.to(device=device)
 
             input_indices = torch.ones_like(y_true).type(torch.long)
             mask = (y_true == losses.PADDED_Y_VALUE)
-            scores = model.score(X, mask, input_indices)
+            scores = model.score(xb.to(device), mask, input_indices)
 
             scores[mask] = float('-inf')
 
             _, indices = scores.sort(descending=True, dim=-1)
-            indices_X = torch.unsqueeze(indices, -1).repeat_interleave(X.shape[-1], -1)
-            res_x = torch.gather(X, dim=1, index=indices_X).cpu()
             res_y = torch.gather(y_true, dim=1, index=indices).cpu()
             res_rank = torch.gather(rank, dim=1, index=indices).cpu()
+            res_q_src = torch.gather(q_src, dim=1, index=indices).cpu()
+            res_x_tgt = torch.gather(x_tgt, dim=1, index=indices).cpu()
 
-            out['feat'].append(res_x)
             out['rank'].append(res_rank)
             out['label'].append(res_y)
             out['qid'].append(qb)
-            out['kid'].append(hb)
+            out['kid'].append(qb) # TODO
+            out['q_src'].append(res_q_src)
+            out['x_tgt'].append(res_x_tgt)
 
     return out
 

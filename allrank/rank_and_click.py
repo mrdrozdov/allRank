@@ -70,10 +70,7 @@ def run():
 
     # load dstore and use as feature func
     dstore = Dstore(**config.dstore)
-    if dstore.enabled:
-        n_features += dstore.vec_size
-        if dstore.load_xb:
-            n_features += dstore.vec_size - 1
+    n_features = dstore.get_n_features(n_features, config)
 
     train_ds, val_ds = load_libsvm_dataset(
         input_path=config.data.path,
@@ -102,7 +99,7 @@ def run():
     logger.info("Will use device {}".format(dev.type))
 
     # instantiate model
-    model = make_model(n_features=n_features, **asdict(config.model, recurse=False))
+    model = make_model(n_features=n_features, dstore=dstore, **asdict(config.model, recurse=False))
 
     model.load_state_dict(load_state_dict_from_file(args.input_model_path, dev))
     logger.info(f"loaded model weights from {args.input_model_path}")
@@ -116,7 +113,9 @@ def run():
 
     # save clickthrough datasets
     for role, out in ranked_slates.items():
-        write_out(os.path.join(paths.output_dir, f"{role}.txt"), out)
+        path = os.path.join(paths.output_dir, f"{role}.txt")
+        print('write to {}'.format(path))
+        write_out(path, out, dstore)
 
     print('DONE')
 

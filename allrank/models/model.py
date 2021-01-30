@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 from attr import asdict
 
@@ -13,7 +14,9 @@ class FCModel(nn.Module):
     """
     This class represents a fully connected neural network model with given layer sizes and activation function.
     """
-    def __init__(self, sizes, input_norm, activation, dropout, n_features):
+    def __init__(self, sizes, input_norm, activation, dropout,
+                 embed_x_tgt=False, embed_q_src=False, embed_size=64,
+                 n_features=None, vocab_size=None):
         """
         :param sizes: list of layer sizes (excluding the input layer size which is given by n_features parameter)
         :param input_norm: flag indicating whether to perform layer normalization on the input
@@ -30,6 +33,11 @@ class FCModel(nn.Module):
         self.dropout = nn.Dropout(dropout or 0.0)
         self.output_size = sizes[-1]
 
+        self.embed_size = embed_size
+        self.embed_x_tgt = embed_x_tgt
+        self.embed_q_src = embed_q_src
+        self.embed = nn.Embedding(vocab_size, embed_size)
+
         self.layers = nn.ModuleList(self.layers)
 
     def forward(self, x):
@@ -38,6 +46,13 @@ class FCModel(nn.Module):
         :param x: input of shape [batch_size, slate_length, self.layers[0].in_features]
         :return: output of shape [batch_size, slate_length, self.output_size]
         """
+        x, q_src, x_tgt = x[:, :, :-2], x[:, :, -2].long(), x[:, :, -1].long()
+        parts = [x]
+        if self.embed_q_src:
+            parts.append(self.embed(q_src))
+        if self.embed_x_tgt:
+            parts.append(self.embed(x_tgt))
+        x = torch.cat(parts, -1)
         x = self.input_norm(x)
         for layer in self.layers:
             x = self.dropout(self.activation(layer(x)))
@@ -128,7 +143,7 @@ class OutputLayer(nn.Module):
             return self.forward(x)
 
 
-def make_model(fc_model, transformer, post_model, n_features):
+def make_model(fc_model, transformer, post_model, n_features, dstore):
     """
     Helper function for instantiating LTRModel.
     :param fc_model: FCModel used as input block
@@ -138,7 +153,7 @@ def make_model(fc_model, transformer, post_model, n_features):
     :return: LTR model instance
     """
     if fc_model:
-        fc_model = FCModel(**fc_model, n_features=n_features)  # type: ignore
+        fc_model = FCModel(**fc_model, n_features=n_features, vocab_size=len(dstore.vocab))  # type: ignore
     d_model = n_features if not fc_model else fc_model.output_size
     if transformer:
         transformer = make_transformer(n_features=d_model, **asdict(transformer, recurse=False))  # type: ignore

@@ -6,21 +6,33 @@ from sklearn.datasets import dump_svmlight_file
 from allrank.data.dataset_loading import PADDED_Y_VALUE
 
 
-def write_out(path, out):
+def write_out(path, out, dstore):
     with open(path, 'w') as f:
         cur_qid = None
-        for rank_lst, label_lst, qid_lst, kid_lst in zip(
-            out['rank'], out['label'], out['qid'], out['kid']):
+        for rank_lst, label_lst, qid_lst, kid_lst, q_src_lst, x_tgt_lst in zip(
+            out['rank'], out['label'], out['qid'], out['kid'], out['q_src'], out['x_tgt']):
 
             rank_lst = rank_lst.view(-1).long().tolist()
             label_lst = label_lst.view(-1).long().tolist()
             qid_lst = qid_lst.view(-1).long().tolist()
             kid_lst = kid_lst.view(-1).long().tolist()
+            q_src_lst = q_src_lst.contiguous().view(-1).long().tolist()
+            x_tgt_lst = x_tgt_lst.contiguous().view(-1).long().tolist()
 
-            for r, l, q, k in zip(rank_lst, label_lst, qid_lst, kid_lst):
+            for r, l, q, k, q_src, x_tgt in zip(rank_lst, label_lst, qid_lst, kid_lst, q_src_lst, x_tgt_lst):
                 if cur_qid is not None and cur_qid != q:
                     f.write('\n')
-                f.write('{} qid:{} key_id={} rank={}\n'.format(l, q, k, r))
+                line = ''
+                line += '{}'.format(l)
+                line += ' {:<16}'.format('qid={}'.format(q))
+                #line += ' {:<16}'.format('xid={}'.format(k))
+                line += ' {:<16}'.format('rnk={}'.format(r))
+                line += ' {:<16}'.format('qtok={}'.format(q_src))
+                line += ' {:<16}'.format('xtok={}'.format(x_tgt))
+                line += ' {:<16}'.format('qstr={}'.format(dstore.vocab.symbols[q_src]))
+                line += ' {:<16}'.format('xstr={}'.format(dstore.vocab.symbols[x_tgt]))
+                line += '\n'
+                f.write(line)
                 cur_qid = q
 
 

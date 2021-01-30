@@ -20,6 +20,9 @@ class FCConfig:
     input_norm = attrib(type=bool)
     activation = attrib(type=str)
     dropout = attrib(type=float)
+    embed_size = attrib(type=int)
+    embed_x_tgt = attrib(type=bool, default=False)
+    embed_q_src = attrib(type=bool, default=False)
 
 
 @attrs
