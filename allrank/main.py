@@ -111,10 +111,15 @@ class Dstore:
         unique_ids_x = set()
         unique_ids_q = set()
         for dl in dl_lst:
-            for xb, yb, indices, qb, hb in dl:
-                xb = torch.chunk(xb.long(), 4, dim=2)[0]
-                unique_ids_q.update(np.unique(qb))
-                unique_ids_x.update(np.unique(xb.long()))
+            n, k, n_sparse_feat = dl.dataset.shape
+            all_x = np.concatenate(dl.dataset.X_by_qid, axis=0).reshape(n, k, n_sparse_feat)
+            all_q = np.concatenate(dl.dataset.q_by_qid, axis=0).reshape(n, k, 1)
+            knns = all_x[:, :, 0]
+            #knn_tgts = all_x[:, :, 3]
+            query_ids = all_q[:, :, 0]
+
+            unique_ids_q.update(np.unique(query_ids))
+            unique_ids_x.update(np.unique(knns.astype(np.int)))
 
         # x
         fetched, index = self.load_fetch(self.path, self.keys, unique_ids_x)
