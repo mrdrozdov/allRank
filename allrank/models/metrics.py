@@ -17,7 +17,6 @@ def prefix(y_pred, y_true, ats=None, gain_function=lambda x: torch.pow(2, x) - 1
     :return: NDCG values for each slate and rank passed, shape [batch_size, len(ats)]
     """
     y_pred, y_true = y_pred.detach(), y_true.detach()
-    assert len(ats) == 1
     order = y_pred.cpu().numpy().argsort(axis=1)[:, ::-1]
 
     prefix = []
