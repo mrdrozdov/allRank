@@ -17,12 +17,11 @@ def prefix(y_pred, y_true, ats=None, gain_function=lambda x: torch.pow(2, x) - 1
     :return: NDCG values for each slate and rank passed, shape [batch_size, len(ats)]
     """
     y_pred, y_true = y_pred.detach(), y_true.detach()
-    order = y_pred.cpu().numpy().argsort(axis=1)[:, ::-1]
+    order = y_pred.argsort(dim=1, descending=True)
 
     prefix = []
     for k in ats:
-        prefix_ = np.take_along_axis(y_true.cpu().numpy(), order, axis=1)[:, :k].mean(axis=1)
-        prefix_ = torch.from_numpy(prefix_).to(device=y_true.device).view(-1, 1)
+        prefix_ = torch.gather(y_true, index=order, dim=1)[:, :k].mean(dim=1).view(-1, 1)
         prefix.append(prefix_)
     prefix = torch.cat(prefix, dim=1)
 
