@@ -28,7 +28,7 @@ def rankNet_weightByGTDiff_pow(y_pred, y_true, padded_value_indicator=PADDED_Y_V
     return rankNet(y_pred, y_true, padded_value_indicator, weight_by_diff=False, weight_by_diff_powed=True)
 
 
-def rankNet(y_pred, y_true, padded_value_indicator=PADDED_Y_VALUE, weight_by_diff=False, weight_by_diff_powed=False):
+def rankNet(y_pred, y_true, padded_value_indicator=PADDED_Y_VALUE, weight_by_diff=False, weight_by_diff_powed=False, indices=None):
     """
     RankNet loss introduced in "Learning to Rank using Gradient Descent".
     :param y_pred: predictions from the model, shape [batch_size, slate_length]
