@@ -1,3 +1,4 @@
+import collections
 import os
 from functools import partial
 
@@ -54,6 +55,31 @@ def compute_metrics(metrics, model, feature_func, dl, dev):
         metric_values_dict.update(dict(zip(metrics_names, metrics_values)))
 
     return metric_values_dict
+
+
+def compute_metrics_one_batch(metrics, model, feature_func, batch, dev):
+    xb, yb, indices = batch
+    out = {}
+    for metric_name, ats in metrics.items():
+        metric_func = getattr(metrics_module, metric_name)
+        metric_func_with_ats = partial(metric_func, ats=ats)
+        metric_vals = metric_on_batch(metric_func_with_ats, model, xb.to(device=dev), yb.to(device=dev), indices.to(device=dev))
+        metric_val_lst = metric_vals.cpu().chunk(len(ats), dim=1)
+        metric_names = ["{metric_name}_{at}".format(metric_name=metric_name, at=at) for at in ats]
+        out.update(zip(metric_names, metric_val_lst))
+    return out
+
+def aggregate_metrics(metrics_dict):
+    # transpose
+    d = collections.defaultdict(list)
+    for d_ in metrics_dict:
+        for k, v in d_.items():
+            d[k].append(v)
+    # aggregate
+    out = {}
+    for k, lst in d.items():
+        out[k] = torch.cat(lst).mean().cpu().numpy()
+    return out
 
 
 def epoch_summary(epoch, train_loss, val_loss, train_metrics, val_metrics):
@@ -127,38 +153,42 @@ def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, 
         # xb dim: [batch_size, slate_length, embedding_dim]
         # yb dim: [batch_size, slate_length]
 
+        train_metrics = []
         train_losses, train_nums = [], []
-        for xb, yb, indices in tqdm(wrap_dl(train_dl, feature_func), desc='tr'):
+        for batch in tqdm(wrap_dl(train_dl, feature_func), desc='tr'):
+            xb, yb, indices = batch
             loss, num = loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
                     gradient_clipping_norm, optimizer)
             train_losses.append(loss)
             train_nums.append(num)
+            metric_dict = compute_metrics_one_batch(config.metrics, model, feature_func, batch, device)
+            train_metrics.append(metric_dict)
+        train_metrics = aggregate_metrics(train_metrics)
 
         #train_losses, train_nums = zip(
         #    *[loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
         #                 gradient_clipping_norm, optimizer) for
         #      xb, yb, indices in train_dl])
-        logger.info('compute loss')
         train_loss = np.sum(np.multiply(train_losses, train_nums)) / np.sum(train_nums)
-        logger.info('Warning: Skipping train metrics.')
         #train_metrics = compute_metrics(config.metrics, model, feature_func, train_dl, device)
-        train_metrics = {}
 
         model.eval()
         with torch.no_grad():
+            val_metrics = []
             val_losses, val_nums = [], []
             for xb, yb, indices in tqdm(wrap_dl(valid_dl, feature_func), desc='va'):
                 loss, num = loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
                         gradient_clipping_norm)
                 val_losses.append(loss)
                 val_nums.append(num)
+                metric_dict = compute_metrics_one_batch(config.metrics, model, feature_func, batch, device)
+                val_metrics.append(metric_dict)
+            val_metrics = aggregate_metrics(val_metrics)
             #val_losses, val_nums = zip(
             #    *[loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
             #                 gradient_clipping_norm) for
             #      xb, yb, indices in valid_dl])
-            logger.info('Warning: Skipp val metrics.')
             #val_metrics = compute_metrics(config.metrics, model, feature_func, valid_dl, device)
-            val_metrics = {}
 
         val_loss = np.sum(np.multiply(val_losses, val_nums)) / np.sum(val_nums)
 
@@ -167,9 +197,7 @@ def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, 
 
         logger.info(epoch_summary(epoch, train_loss, val_loss, train_metrics, val_metrics))
 
-        logger.info('Warning: The val metric is hard-coded.')
-        #current_val_metric_value = val_metrics.get(config.val_metric)
-        current_val_metric_value = 1
+        current_val_metric_value = val_metrics.get(config.val_metric)
         if scheduler:
             if type(scheduler) == torch.optim.lr_scheduler.ReduceLROnPlateau:
                 args = [val_metrics[config.val_metric]]
