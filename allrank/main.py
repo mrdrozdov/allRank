@@ -46,6 +46,7 @@ class Dstore:
         self.vec_size = vec_size
         self.enabled = enabled
         self.load_xb = load_xb
+        self.load_in_main_loop= load_in_main_loop
         self.main_loop_batch = main_loop_batch
         self.prefetch = prefetch
         self._initialized = False
@@ -54,6 +55,7 @@ class Dstore:
             self.vocab.add_from_file(vocab)
             self.vocab.finalize()
             print('Found vocab with size {} at path {}'.format(len(self.vocab), vocab))
+        self.initialize()
 
     def initialize(self):
         self.keys = np.memmap(os.path.join(self.path, 'dstore_keys.npy'), dtype=np.float32, mode='r', shape=(self.dstore_size, self.vec_size))
@@ -105,8 +107,6 @@ class Dstore:
         return cache, index
 
     def run_prefetch(self, dl_lst):
-        if not self._initialized:
-            self.initialize()
         print('Run prefetch...')
         unique_ids_x = set()
         unique_ids_q = set()
@@ -173,8 +173,9 @@ class Dstore:
         return out
 
     def _load_in_main_loop(self, xb, qb):
-        if not self._initialized:
-            self.initialize()
+        return self.load(xb, qb)
+
+    def _load_in_collate(self, xb, qb):
         return self.load(xb, qb)
 
 

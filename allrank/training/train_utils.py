@@ -3,6 +3,7 @@ from functools import partial
 
 import numpy as np
 import torch
+from tqdm import tqdm
 from torch.nn.utils import clip_grad_norm_
 
 import allrank.models.metrics as metrics_module
@@ -10,7 +11,6 @@ from allrank.data.dataset_loading import PADDED_Y_VALUE
 from allrank.models.model_utils import get_num_params, log_num_params
 from allrank.training.early_stop import EarlyStop
 from allrank.utils.ltr_logging import get_logger
-from allrank.utils.tensorboard_utils import TensorboardSummaryWriter
 
 logger = get_logger()
 
@@ -93,14 +93,19 @@ def wrap_dl(dl, feature_func, return_all=False):
             yield cache
 
     def multi_batch(cache):
-        mxb, _, _, mqb, _ = zip(*cache)
-        new_xb = feature_func._load_in_main_loop(torch.cat(mxb, 0), torch.cat(mqb, 0))
-        new_mxb = torch.split(new_xb, mxb[0].shape[0], dim=0)
-        for xb, old_xb, sample in zip(new_mxb, mxb, cache):
-            _, yb, indices, qb, hb = sample
-            hb = old_xb
-            sample = xb, yb, indices, qb, hb
-            yield res_func(sample)
+        if not feature_func.load_in_main_loop:
+            for sample in cache:
+                yield res_func(sample)
+
+        else:
+            mxb, _, _, mqb, _ = zip(*cache)
+            new_xb = feature_func._load_in_main_loop(torch.cat(mxb, 0), torch.cat(mqb, 0))
+            new_mxb = torch.split(new_xb, mxb[0].shape[0], dim=0)
+            for xb, old_xb, sample in zip(new_mxb, mxb, cache):
+                _, yb, indices, qb, hb = sample
+                hb = old_xb
+                sample = xb, yb, indices, qb, hb
+                yield res_func(sample)
 
     for cache in first_wrap(dl):
         for out in multi_batch(cache):
@@ -109,7 +114,6 @@ def wrap_dl(dl, feature_func, return_all=False):
 
 def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, valid_dl, config,
         gradient_clipping_norm, early_stopping_patience, device, output_dir, tensorboard_output_path):
-    tensorboard_summary_writer = TensorboardSummaryWriter(tensorboard_output_path)
 
     num_params = get_num_params(model)
     log_num_params(num_params)
@@ -124,7 +128,7 @@ def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, 
         # yb dim: [batch_size, slate_length]
 
         train_losses, train_nums = [], []
-        for xb, yb, indices in wrap_dl(train_dl, feature_func):
+        for xb, yb, indices in tqdm(wrap_dl(train_dl, feature_func), desc='tr'):
             loss, num = loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
                     gradient_clipping_norm, optimizer)
             train_losses.append(loss)
@@ -134,13 +138,16 @@ def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, 
         #    *[loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
         #                 gradient_clipping_norm, optimizer) for
         #      xb, yb, indices in train_dl])
+        logger.info('compute loss')
         train_loss = np.sum(np.multiply(train_losses, train_nums)) / np.sum(train_nums)
-        train_metrics = compute_metrics(config.metrics, model, feature_func, train_dl, device)
+        logger.info('Warning: Skipping train metrics.')
+        #train_metrics = compute_metrics(config.metrics, model, feature_func, train_dl, device)
+        train_metrics = {}
 
         model.eval()
         with torch.no_grad():
             val_losses, val_nums = [], []
-            for xb, yb, indices in wrap_dl(valid_dl, feature_func):
+            for xb, yb, indices in tqdm(wrap_dl(valid_dl, feature_func), desc='va'):
                 loss, num = loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
                         gradient_clipping_norm)
                 val_losses.append(loss)
@@ -149,25 +156,20 @@ def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, 
             #    *[loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
             #                 gradient_clipping_norm) for
             #      xb, yb, indices in valid_dl])
-            val_metrics = compute_metrics(config.metrics, model, feature_func, valid_dl, device)
+            logger.info('Warning: Skipp val metrics.')
+            #val_metrics = compute_metrics(config.metrics, model, feature_func, valid_dl, device)
+            val_metrics = {}
 
         val_loss = np.sum(np.multiply(val_losses, val_nums)) / np.sum(val_nums)
 
-        tensorboard_metrics_dict = {("train", "loss"): train_loss, ("val", "loss"): val_loss}
         if config.log['save_every_epoch']:
             torch.save(model.state_dict(), os.path.join(output_dir, "model-epoch{}.pkl".format(epoch)))
 
-        train_metrics_to_tb = {("train", name): value for name, value in train_metrics.items()}
-        tensorboard_metrics_dict.update(train_metrics_to_tb)
-        val_metrics_to_tb = {("val", name): value for name, value in val_metrics.items()}
-        tensorboard_metrics_dict.update(val_metrics_to_tb)
-        tensorboard_metrics_dict.update({("train", "lr"): get_current_lr(optimizer)})
-
-        tensorboard_summary_writer.save_to_tensorboard(tensorboard_metrics_dict, epoch)
-
         logger.info(epoch_summary(epoch, train_loss, val_loss, train_metrics, val_metrics))
 
-        current_val_metric_value = val_metrics.get(config.val_metric)
+        logger.info('Warning: The val metric is hard-coded.')
+        #current_val_metric_value = val_metrics.get(config.val_metric)
+        current_val_metric_value = 1
         if scheduler:
             if type(scheduler) == torch.optim.lr_scheduler.ReduceLROnPlateau:
                 args = [val_metrics[config.val_metric]]
@@ -184,7 +186,6 @@ def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, 
             break
 
     torch.save(model.state_dict(), os.path.join(output_dir, "model.pkl"))
-    tensorboard_summary_writer.close_all_writers()
 
     return {
         "epochs": epoch,
