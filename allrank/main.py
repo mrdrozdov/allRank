@@ -78,31 +78,31 @@ class Dstore:
         index = list(sorted(index))
 
         m = hashlib.sha256()
-        m.update(str.encode('v0.0.2'))
+        m.update(str.encode('v0.0.3'))
         for x in index:
             m.update(str.encode('{}'.format(x)))
         data_hash = m.hexdigest()
 
         cache_path = os.path.join(path, '{}.cache.npy'.format(data_hash))
 
+        shape = (len(index), self.vec_size)
         if not os.path.exists(cache_path):
-            print('build cache and save to {}'.format(cache_path))
+            shape = (len(index), self.vec_size)
+            print('build cache shape = {}, and save to {}'.format(shape, cache_path))
+            cache = np.memmap(cache_path, mode='w+', dtype=np.float32, shape=shape)
             bsz = 1000
             nbatches = len(index) // bsz
             if nbatches * bsz < len(index):
                 nbatches += 1
-            fetched = []
             for i in tqdm(range(nbatches)):
                 start = i * bsz
                 end = min(start + bsz, len(index))
                 local_index = index[start:end]
-                fetched.append(keys[local_index])
-            fetched = np.concatenate(fetched, axis=0)
-            np.save(cache_path, fetched)
-        else:
-            print('read cache from {}'.format(cache_path))
-            fetched = np.load(cache_path)
-        return fetched, index
+                cache[start:end] = keys[local_index]
+            del cache
+        print('read cache from {}'.format(cache_path))
+        cache = np.memmap(cache_path, mode='r', dtype=np.float32, shape=shape)
+        return cache, index
 
     def run_prefetch(self, dl_lst):
         if not self._initialized:

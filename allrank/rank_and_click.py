@@ -1,3 +1,4 @@
+import collections
 import os
 from argparse import ArgumentParser, Namespace
 from pprint import pformat
@@ -25,7 +26,7 @@ from allrank.utils.ltr_logging import init_logger
 from allrank.utils.python_utils import all_equal
 
 
-def parse_args() -> Namespace:
+def parse_args():
     parser = ArgumentParser("allRank rank and apply click model")
     parser.add_argument("--job-dir", help="Base output path for all experiments", required=True)
     parser.add_argument("--run-id", help="Name of this run to be recorded (must be unique within output dir)",
@@ -113,11 +114,30 @@ def run():
 
     # save clickthrough datasets
     for role, out in ranked_slates.items():
-        path = os.path.join(paths.output_dir, f"{role}.txt")
-        print('write to {}'.format(path))
-        write_out(path, out, dstore)
+        write_out_dir(paths.output_dir, role, out, dstore)
 
     print('DONE')
+
+
+def write_out_dir(path, role, out, dstore):
+    print('write to {}'.format(path))
+    keys = ['knn_rank', 'query_id', 'knns', 'knn_tgts']
+    out['knns'] = out['kid']
+    out['knn_tgts'] = out['x_tgt']
+    out['knn_rank'] = out['rank']
+    out['query_id'] = out['qid']
+    #
+    new_out = collections.OrderedDict()
+    for k in keys:
+        assert len(out[k]) > 0, k
+        new_out[k] = torch.cat(out[k], 0).unsqueeze(-1).numpy()
+    new_out['query_id'] = new_out['query_id'][:, 0]
+    #
+    for k, v in new_out.items():
+        new_path = os.path.join(path, 'out_{}_{}.npy'.format(role, k))
+        print('writing {} with shape {}'.format(new_path, v.shape))
+        x = np.memmap(new_path, mode='w+', dtype=np.int, shape=v.shape)
+        x[:] = v
 
 
 if __name__ == "__main__":
