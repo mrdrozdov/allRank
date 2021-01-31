@@ -77,10 +77,8 @@ class Dstore:
         return n_features
 
     def load_fetch(self, path, keys, index):
-        index = list(sorted(index))
-
         m = hashlib.sha256()
-        m.update(str.encode('v0.0.3'))
+        m.update(str.encode('v0.0.4'))
         for x in index:
             m.update(str.encode('{}'.format(x)))
         data_hash = m.hexdigest()
@@ -110,54 +108,56 @@ class Dstore:
         print('Run prefetch...')
         unique_ids_x = set()
         unique_ids_q = set()
+
+        all_lst = collections.defaultdict(list)
         for dl in dl_lst:
             n, k, n_sparse_feat = dl.dataset.shape
-            all_x = np.concatenate(dl.dataset.X_by_qid, axis=0).reshape(n, k, n_sparse_feat)
-            all_q = np.concatenate(dl.dataset.q_by_qid, axis=0).reshape(n, k, 1)
-            knns = all_x[:, :, 0]
+            all_lst['x'].append(np.concatenate(dl.dataset.X_by_qid, axis=0).reshape(n, k, n_sparse_feat)[:, :, 0])
+            all_lst['q'].append(np.concatenate(dl.dataset.q_by_qid, axis=0).reshape(n, k, 1)[:, :, 0])
+            all_lst['dl'].append(dl)
+            #knns = all_x[:, :, 0]
             #knn_tgts = all_x[:, :, 3]
-            query_ids = all_q[:, :, 0]
+            #query_ids = all_q[:, :, 0]
 
-            unique_ids_q.update(np.unique(query_ids))
-            unique_ids_x.update(np.unique(knns.astype(np.int)))
+            #unique_ids_q.update(query_ids)
+            #unique_ids_x.update(knns.astype(np.int))
 
         # x
-        fetched, index = self.load_fetch(self.path, self.keys, unique_ids_x)
-        index = np.asarray(index, dtype=np.int)
-        data = np.arange(index.shape[0])
-        indices = np.zeros(data.shape[0], dtype=np.int)
-        indptr = np.zeros(self.keys.shape[0] + 1, dtype=np.int)
-        indptr[index + 1] = 1
-        indptr = np.cumsum(indptr)
-        sparse_to_dense = scipy.sparse.csr_matrix(
-                (data, indices, indptr),
-                shape=(self.keys.shape[0], 1), dtype=np.int)
-        self.sparse_vecs = fetched
-        self.sparse_to_dense = sparse_to_dense
+        ids = np.concatenate(all_lst['x'], axis=0).astype(np.int)
+        u, inv = np.unique(ids, return_inverse=True)
+        fetched, index = self.load_fetch(self.path, self.keys, u)
+
+        self.unique_x = u
+        self.x_vecs = fetched
+        offset = 0
+        for x, dl in zip(all_lst['x'], all_lst['dl']):
+            for bucket in dl.dataset.X_by_qid:
+                size, _ = bucket.shape
+                bucket[:, 0] = inv[offset:offset + size]
+                offset += size
 
         # q
-        fetched, index = self.load_fetch(self.q_path, self.keys, unique_ids_q)
-        index = np.asarray(index, dtype=np.int)
-        data = np.arange(index.shape[0])
-        indices = np.zeros(data.shape[0], dtype=np.int)
-        indptr = np.zeros(self.keys.shape[0] + 1, dtype=np.int)
-        indptr[index + 1] = 1
-        indptr = np.cumsum(indptr)
-        sparse_to_dense = scipy.sparse.csr_matrix(
-                (data, indices, indptr),
-                shape=(self.keys.shape[0], 1), dtype=np.int)
-        self.q_sparse_vecs = fetched
-        self.q_sparse_to_dense = sparse_to_dense
+        ids = np.concatenate(all_lst['q'], axis=0).astype(np.int)
+        u, inv = np.unique(ids, return_inverse=True)
+        fetched, index = self.load_fetch(self.q_path, self.q_keys, u)
+
+        self.unique_q = u
+        self.q_vecs = fetched
+        offset = 0
+        for x, dl in zip(all_lst['x'], all_lst['dl']):
+            for bucket in dl.dataset.q_by_qid:
+                size = bucket.shape[0]
+                bucket[:] = inv[offset:offset + size]
+                offset += size
+
         print('done.')
 
     def load_from_memmap(self, idx, feat_type=None):
         u, inv = np.unique(idx.cpu().long().numpy(), return_inverse=True)
         if feat_type == 'x':
-            new_idx = self.sparse_to_dense[u].toarray().reshape(-1)
-            tmp = self.sparse_vecs[new_idx]
+            tmp = self.x_vecs[u]
         elif feat_type == 'q':
-            new_idx = self.q_sparse_to_dense[u].toarray().reshape(-1)
-            tmp = self.q_sparse_vecs[new_idx]
+            tmp = self.q_vecs[u]
         else:
             raise ValueError
 
