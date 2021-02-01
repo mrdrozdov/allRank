@@ -98,6 +98,7 @@ class Config:
     val_metric = attrib(type=str, default=None)
     expected_metrics = attrib(type=Dict[str, Dict[str, float]], default={})
     detect_anomaly = attrib(type=bool, default=False)
+    seed = attrib(type=int, default=42)
     click_model = attrib(type=Optional[NameArgsConfig], default=None)
 
     @classmethod

@@ -360,10 +360,6 @@ class Dictionary(object):
 
 
 def run():
-    # reproducibility
-    torch.manual_seed(42)
-    torch.cuda.manual_seed_all(42)
-    np.random.seed(42)
 
     args = parse_args()
 
@@ -377,6 +373,12 @@ def run():
     # read config
     config = Config.from_json(paths.config_path)
     logger.info("Config:\n {}".format(pformat(vars(config), width=1)))
+
+    # reproducibility
+    torch.manual_seed(config.seed)
+    torch.cuda.manual_seed_all(config.seed)
+    np.random.seed(config.seed)
+    logger.info("Seed: {}".format(config.seed))
 
     output_config_path = os.path.join(paths.output_dir, "used_config.json")
     execute_command("cp {} {}".format(paths.config_path, output_config_path))
