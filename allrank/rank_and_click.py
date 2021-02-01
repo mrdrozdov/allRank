@@ -63,21 +63,16 @@ def run():
     output_config_path = os.path.join(paths.output_dir, "used_config.json")
     execute_command("cp {} {}".format(paths.config_path, output_config_path))
 
-    datasets = {role: load_libsvm_dataset_role(role, config.data.path, config.data.slate_length) for role in args.roles}
-
-    n_features = [ds.shape[-1] for ds in datasets.values()]
-    assert all_equal(n_features), f"Last dimensions of datasets must match but got {n_features}"
-    n_features = n_features[0]
-
-    # load dstore and use as feature func
-    dstore = Dstore(**config.dstore)
-    n_features = dstore.get_n_features(n_features, config)
-
     train_ds, val_ds = load_libsvm_dataset(
         input_path=config.data.path,
         slate_length=config.data.slate_length,
         validation_ds_role=config.data.validation_ds_role,
     )
+
+    # load dstore and use as feature func
+    dstore = Dstore(**config.dstore)
+    n_features = train_ds.shape[-1]
+    n_features = dstore.get_n_features(n_features, config)
 
     train_dl, val_dl = create_data_loaders(
         train_ds, val_ds, num_workers=config.data.num_workers, batch_size=config.data.batch_size,
@@ -85,15 +80,6 @@ def run():
 
     if dstore.prefetch:
         dstore.run_prefetch([train_dl, val_dl])
-    del train_ds
-    del val_ds
-    del train_dl
-    del val_dl
-
-    datasets = {role: make_dataloader(ds,
-        num_workers=config.data.num_workers,
-        batch_size=config.data.batch_size,
-        dstore=dstore) for role, ds in datasets.items()}
 
     # gpu support
     dev = get_torch_device()
@@ -110,9 +96,11 @@ def run():
         logger.info("Model training will be distributed to {} GPUs.".format(torch.cuda.device_count()))
     model.to(dev)
 
+    datasets = {'vali': val_dl}
+
     ranked_slates = rank_slates(datasets, model, dstore, config)
 
-    # save clickthrough datasets
+    # save output
     for role, out in ranked_slates.items():
         write_out_dir(paths.output_dir, role, out, dstore)
 
@@ -121,7 +109,7 @@ def run():
 
 def write_out_dir(path, role, out, dstore):
     print('write to {}'.format(path))
-    keys = ['knn_rank', 'query_id', 'knns', 'knn_tgts']
+    keys = ['knn_rank', 'query_id', 'knns', 'knn_tgts', 'scores']
     out['knns'] = out['kid']
     out['knn_tgts'] = out['x_tgt']
     out['knn_rank'] = out['rank']
@@ -132,6 +120,11 @@ def write_out_dir(path, role, out, dstore):
         assert len(out[k]) > 0, k
         new_out[k] = torch.cat(out[k], 0).unsqueeze(-1).numpy()
     new_out['query_id'] = new_out['query_id'][:, 0]
+    # revert cache ids
+    shape = new_out['query_id'].shape
+    new_out['query_id'] = dstore.unique_q[new_out['query_id'].reshape(-1)].reshape(*shape)
+    shape = new_out['knns'].shape
+    new_out['knns'] = dstore.unique_x[new_out['knns'].reshape(-1)].reshape(*shape)
     #
     for k, v in new_out.items():
         new_path = os.path.join(path, 'out_{}_{}.npy'.format(role, k))

@@ -46,7 +46,7 @@ class FCModel(nn.Module):
         :param x: input of shape [batch_size, slate_length, self.layers[0].in_features]
         :return: output of shape [batch_size, slate_length, self.output_size]
         """
-        x, q_src, x_tgt = x[:, :, :-2], x[:, :, -2].long(), x[:, :, -1].long()
+        x, q_src, x_tgt = x[:, :, :-3], x[:, :, -2].long(), x[:, :, -1].long()
         parts = [x]
         if self.embed_q_src:
             parts.append(self.embed(q_src))

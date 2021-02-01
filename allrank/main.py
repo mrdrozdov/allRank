@@ -85,6 +85,8 @@ class Dstore:
 
         cache_path = os.path.join(path, '{}.cache.npy'.format(data_hash))
 
+        print('cache source shape {}'.format(keys.shape))
+
         shape = (len(index), self.vec_size)
         if not os.path.exists(cache_path):
             shape = (len(index), self.vec_size)
@@ -169,7 +171,7 @@ class Dstore:
         x_id, q_src, q_tgt, x_tgt = torch.chunk(xb.long(), 4, dim=2)
         xb = self.load_from_memmap(x_id, feat_type='x')
         qb = self.load_from_memmap(qb, feat_type='q')
-        out = torch.cat([xb, qb, q_src.float(), x_tgt.float()], -1)
+        out = torch.cat([xb, qb, x_id.float(), q_src.float(), x_tgt.float()], -1)
         return out
 
     def _load_in_main_loop(self, xb, qb):

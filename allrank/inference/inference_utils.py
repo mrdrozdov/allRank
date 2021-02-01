@@ -47,6 +47,7 @@ def __rank_slates(dataloader: DataLoader, model: LTRModel, dstore):
 
     with torch.no_grad():
         for xb, yb, indices, qb, hb in wrap_dl(dataloader, dstore, return_all=True):
+            x_id = xb[:, :, -3].long().to(device)
             q_src = xb[:, :, -2].long().to(device)
             x_tgt = xb[:, :, -1].long().to(device)
             rank = indices.to(device=device)
@@ -61,15 +62,18 @@ def __rank_slates(dataloader: DataLoader, model: LTRModel, dstore):
             _, indices = scores.sort(descending=True, dim=-1)
             res_y = torch.gather(y_true, dim=1, index=indices).cpu()
             res_rank = torch.gather(rank, dim=1, index=indices).cpu()
+            res_x_id = torch.gather(x_id, dim=1, index=indices).cpu()
             res_q_src = torch.gather(q_src, dim=1, index=indices).cpu()
             res_x_tgt = torch.gather(x_tgt, dim=1, index=indices).cpu()
+            res_scores = scores.gather(index=indices, dim=1).cpu()
 
             out['rank'].append(res_rank)
             out['label'].append(res_y)
             out['qid'].append(qb)
-            out['kid'].append(qb) # TODO
+            out['kid'].append(res_x_id)
             out['q_src'].append(res_q_src)
             out['x_tgt'].append(res_x_tgt)
+            out['scores'].append(res_scores)
 
     return out
 
