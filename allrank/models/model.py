@@ -36,7 +36,8 @@ class FCModel(nn.Module):
         self.embed_size = embed_size
         self.embed_x_tgt = embed_x_tgt
         self.embed_q_src = embed_q_src
-        self.embed = nn.Embedding(vocab_size, embed_size)
+        if self.embed_x_tgt or self.embed_q_src:
+            self.embed = nn.Embedding(vocab_size, embed_size)
 
         self.layers = nn.ModuleList(self.layers)
 
