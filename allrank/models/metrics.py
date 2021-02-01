@@ -4,33 +4,26 @@ import torch
 from allrank.data.dataset_loading import PADDED_Y_VALUE
 
 
-def prefix(y_pred, y_true, ats=None, gain_function=lambda x: torch.pow(2, x) - 1, padding_indicator=PADDED_Y_VALUE):
+def prefix(y_pred, y_true, indices=None, ats=None, gain_function=lambda x: torch.pow(2, x) - 1, padding_indicator=PADDED_Y_VALUE):
     """
-    Normalized Discounted Cumulative Gain at k.
-
-    Compute NDCG at ranks given by ats or at the maximum rank if ats is None.
-    :param y_pred: predictions from the model, shape [batch_size, slate_length]
-    :param y_true: ground truth labels, shape [batch_size, slate_length]
-    :param ats: optional list of ranks for NDCG evaluation, if None, maximum rank is used
-    :param gain_function: callable, gain function for the ground truth labels, e.g. torch.pow(2, x) - 1
-    :param padding_indicator: an indicator of the y_true index containing a padded item, e.g. -1
-    :return: NDCG values for each slate and rank passed, shape [batch_size, len(ats)]
+    Compute diff in prefix compared with ground truth.
     """
     y_pred, y_true = y_pred.detach(), y_true.detach()
     order = y_pred.argsort(dim=1, descending=True)
+    gt_order = indices.argsort(dim=1)
 
     prefix = []
     for k in ats:
+        gt_prefix_ = torch.gather(y_true, index=gt_order, dim=1)[:, :k].mean(dim=1).view(-1, 1)
         prefix_ = torch.gather(y_true, index=order, dim=1)[:, :k].mean(dim=1).view(-1, 1)
-        prefix.append(prefix_)
+        diff_ = prefix_ - gt_prefix_
+        prefix.append(diff_)
     prefix = torch.cat(prefix, dim=1)
-
-    assert (prefix < 0.0).sum() >= 0, "every ndcg should be non-negative"
 
     return prefix
 
 
-def ndcg(y_pred, y_true, ats=None, gain_function=lambda x: torch.pow(2, x) - 1, padding_indicator=PADDED_Y_VALUE):
+def ndcg(y_pred, y_true, indices=None, ats=None, gain_function=lambda x: torch.pow(2, x) - 1, padding_indicator=PADDED_Y_VALUE):
     """
     Normalized Discounted Cumulative Gain at k.
 

@@ -32,7 +32,7 @@ def loss_batch(model, loss_func, xb, yb, indices, gradient_clipping_norm, opt=No
 
 def metric_on_batch(metric, model, xb, yb, indices):
     mask = (yb == PADDED_Y_VALUE)
-    return metric(model.score(xb, mask, indices), yb)
+    return metric(model.score(xb, mask, indices), yb, indices)
 
 
 def metric_on_epoch(metric, model, feature_func, dl, dev):
@@ -176,7 +176,8 @@ def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, 
         with torch.no_grad():
             val_metrics = []
             val_losses, val_nums = [], []
-            for xb, yb, indices in tqdm(wrap_dl(valid_dl, feature_func), desc='va'):
+            for batch in tqdm(wrap_dl(valid_dl, feature_func), desc='va'):
+                xb, yb, indices = batch
                 loss, num = loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
                         gradient_clipping_norm)
                 val_losses.append(loss)
