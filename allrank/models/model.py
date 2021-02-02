@@ -1,9 +1,13 @@
+import io
+
 import torch
 import torch.nn as nn
 from attr import asdict
 
 from allrank.models.transformer import make_transformer
 from allrank.utils.python_utils import instantiate_class
+
+from tqdm import tqdm
 
 
 def first_arg_id(x, *y):
@@ -15,7 +19,8 @@ class FCModel(nn.Module):
     This class represents a fully connected neural network model with given layer sizes and activation function.
     """
     def __init__(self, sizes, input_norm, activation, dropout,
-                 embed_x_tgt=False, embed_q_src=False, embed_size=64,
+                 embed_x_tgt=False, embed_q_src=False, embed_size=64, freeze_embed=False,
+                 ignore_q_feat=False, ignore_x_feat=False,
                  n_features=None, vocab_size=None):
         """
         :param sizes: list of layer sizes (excluding the input layer size which is given by n_features parameter)
@@ -33,13 +38,42 @@ class FCModel(nn.Module):
         self.dropout = nn.Dropout(dropout or 0.0)
         self.output_size = sizes[-1]
 
+        self.ignore_q_feat = ignore_q_feat
+        self.ignore_x_feat = ignore_x_feat
         self.embed_size = embed_size
         self.embed_x_tgt = embed_x_tgt
         self.embed_q_src = embed_q_src
         if self.embed_x_tgt or self.embed_q_src:
             self.embed = nn.Embedding(vocab_size, embed_size)
+            if freeze_embed:
+                self.embed.weight.requires_grad = False
 
         self.layers = nn.ModuleList(self.layers)
+
+    def init_from_fasttext(self, dstore):
+        weight = self.embed.weight.data
+        vocab_size, emb_size = weight.shape
+
+        sym2idx = {tok: i for i, tok in enumerate(dstore.vocab.symbols)}
+
+        # read fasttext
+        path = dstore.fasttext_path
+        f = io.open(path, 'r', encoding='utf-8', newline='\n', errors='ignore')
+        n, d = map(int, f.readline().split()) # read first line (and skip)
+        assert d == emb_size, (d, emb_size)
+        data = {}
+        sofar = 0
+        for line in tqdm(f, total=n):
+            tokens = line.rstrip().split(' ')
+            sym = tokens[0]
+            if sym not in sym2idx:
+                continue
+            idx = sym2idx[sym]
+            weight[idx] = torch.tensor(list(map(float, tokens[1:])), dtype=weight.dtype)
+            sofar += 1
+        print('initialize {} / {} vectors from {}'.format(
+            sofar, vocab_size, path
+            ))
 
     def forward(self, x):
         """
@@ -47,8 +81,14 @@ class FCModel(nn.Module):
         :param x: input of shape [batch_size, slate_length, self.layers[0].in_features]
         :return: output of shape [batch_size, slate_length, self.output_size]
         """
-        x, q_src, x_tgt = x[:, :, :-3], x[:, :, -2].long(), x[:, :, -1].long()
-        parts = [x]
+        q_src, x_tgt = x[:, :, -2].long(), x[:, :, -1].long()
+        feat = x[:, :, :-3]
+        x_feat, q_feat = torch.chunk(feat, 2, dim=-1)
+        parts = []
+        if not self.ignore_x_feat:
+            parts.append(x_feat)
+        if not self.ignore_q_feat:
+            parts.append(q_feat)
         if self.embed_q_src:
             parts.append(self.embed(q_src))
         if self.embed_x_tgt:
@@ -159,6 +199,8 @@ def make_model(fc_model, transformer, post_model, n_features, dstore):
     if transformer:
         transformer = make_transformer(n_features=d_model, **asdict(transformer, recurse=False))  # type: ignore
     model = LTRModel(fc_model, transformer, OutputLayer(d_model, **post_model))
+    if dstore.init_from_fasttext:
+        fc_model.init_from_fasttext(dstore)
 
     # Initialize parameters with Glorot / fan_avg.
     for p in model.parameters():

@@ -23,6 +23,9 @@ class FCConfig:
     embed_size = attrib(type=int)
     embed_x_tgt = attrib(type=bool, default=False)
     embed_q_src = attrib(type=bool, default=False)
+    freeze_embed = attrib(type=bool, default=False)
+    ignore_x_feat = attrib(type=bool, default=False)
+    ignore_q_feat = attrib(type=bool, default=False)
 
 
 @attrs
@@ -40,6 +43,7 @@ class ModelConfig:
 
 @attrs
 class DstoreConfig:
+    fasttext_path = attrib(type=str)
     path = attrib(type=str)
     dstore_size = attrib(type=int)
     vec_size = attrib(type=int)
@@ -49,6 +53,7 @@ class DstoreConfig:
     main_loop_batch = attrib(type=int, default=10)
     load_xb = attrib(type=bool, default=False)
     prefetch = attrib(type=bool, default=False)
+    init_from_fasttext = attrib(type=bool, default=False)
 
 
 @attrs

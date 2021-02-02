@@ -38,7 +38,7 @@ def parse_args() -> Namespace:
 
 class Dstore:
     def __init__(self, path, dstore_size=None, vec_size=None, enabled=False, load_in_collate=False, load_in_main_loop=False, main_loop_batch=None, load_xb=False, prefetch=False,
-                       q_path=None, q_dstore_size=None, vocab=None):
+                       q_path=None, q_dstore_size=None, vocab=None, init_from_fasttext=False, fasttext_path=None):
         self.path = path
         self.dstore_size = dstore_size
         self.q_path = q_path
@@ -55,6 +55,8 @@ class Dstore:
             self.vocab.add_from_file(vocab)
             self.vocab.finalize()
             print('Found vocab with size {} at path {}'.format(len(self.vocab), vocab))
+        self.init_from_fasttext = init_from_fasttext
+        self.fasttext_path = fasttext_path
         self.initialize()
 
     def initialize(self):
@@ -64,12 +66,14 @@ class Dstore:
 
     def get_n_features(self, n_features, config):
         if self.enabled:
-            n_features += self.vec_size # query vector
-            n_features += self.vec_size # key vector
             n_features -= 1 # key id
             n_features -= 1 # query src
             n_features -= 1 # query tgt
             n_features -= 1 # key tgt
+        if not config.model.fc_model['ignore_q_feat']:
+            n_features += self.vec_size # query vector
+        if not config.model.fc_model['ignore_x_feat']:
+            n_features += self.vec_size # key vector
         if config.model.fc_model['embed_q_src']:
             n_features += config.model.fc_model['embed_size']
         if config.model.fc_model['embed_x_tgt']:
