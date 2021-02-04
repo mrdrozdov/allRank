@@ -47,8 +47,9 @@ def warp(y_pred, y_true, padded_value_indicator=PADDED_Y_VALUE, weight_by_diff=F
     selected_pred = y_pred[:, document_pairs_candidates]
 
     # here we calculate the relative true relevance of every candidate pair
+    margin = 1
     true_diffs = pairs_true[:, :, 0] - pairs_true[:, :, 1]
-    pred_diffs = selected_pred[:, :, 0] - selected_pred[:, :, 1]
+    pred_diffs = selected_pred[:, :, 0] - selected_pred[:, :, 1] - margin
     is_correct = true_diffs.sign() == pred_diffs.sign() # TODO: This will change with margin.
 
     # here we filter just the pairs that are 'positive' and did not involve a padded instance
