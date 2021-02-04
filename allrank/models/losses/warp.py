@@ -28,7 +28,7 @@ def rankNet_weightByGTDiff_pow(y_pred, y_true, padded_value_indicator=PADDED_Y_V
     return rankNet(y_pred, y_true, padded_value_indicator, weight_by_diff=False, weight_by_diff_powed=True)
 
 
-def warp(y_pred, y_true, padded_value_indicator=PADDED_Y_VALUE, weight_by_diff=False, weight_by_diff_powed=False, indices=None, mode='mean_rank'):
+def warp(y_pred, y_true, padded_value_indicator=PADDED_Y_VALUE, weight_by_diff=False, weight_by_diff_powed=False, indices=None, mode='mean_rank', margin=0.01):
     """
     TODO: Add margin.
     """
@@ -47,7 +47,6 @@ def warp(y_pred, y_true, padded_value_indicator=PADDED_Y_VALUE, weight_by_diff=F
     selected_pred = y_pred[:, document_pairs_candidates]
 
     # here we calculate the relative true relevance of every candidate pair
-    margin = 1
     true_diffs = pairs_true[:, :, 0] - pairs_true[:, :, 1]
     pred_diffs = selected_pred[:, :, 0] - selected_pred[:, :, 1] - margin
     is_correct = true_diffs.sign() == pred_diffs.sign() # TODO: This will change with margin.
@@ -68,7 +67,7 @@ def warp(y_pred, y_true, padded_value_indicator=PADDED_Y_VALUE, weight_by_diff=F
     done_vec = N_vec.clone().bool().fill_(False)
     done_vec[Y_vec == 0] = True
     pair_vec = N_vec.clone().long().fill_(0)
-    max_N = the_mask.shape[-1] // 2
+    max_N = Y_vec.max().item()
 
     # TODO: What if all done already?
 
@@ -88,25 +87,25 @@ def warp(y_pred, y_true, padded_value_indicator=PADDED_Y_VALUE, weight_by_diff=F
         N_vec[done_vec == False] += 1
         # Update done if found incorrect pair.
         done_vec[pair_correct.view(-1) == False] = True
+        # Update done if hit max_N.
+        done_vec[step >= Y_vec - 1] = True
 
         # This isn't necessary, but will terminate early if done.
         if done_vec.all().item():
             break
 
-    def l_func(x):
-        # TODO: Handle mode here.
-        return x.detach()
+    def l_func(Y_vec, N_vec):
+        assert (Y_vec >= N_vec).all().item(), torch.cat([Y_vec.view(-1, 1), N_vec.view(-1, 1)], 1)
+        rank = Y_vec // N_vec # we don't subtract 1 from Y because we work with pairs
+        assert (rank > 0).all().item(), rank
+        if mode == 'mean_rank':
+            out = rank / Y_vec
+        return out.detach()
 
     # TODO: What if mask is empty?
     m = (Y_vec > 0) & (done_vec == True) # mask for valid examples.
     energy = -pred_diffs.gather(index=pair_vec.view(-1, 1), dim=1)
-
-    try:
-        assert (energy[m] >= 0).all().item(), energy[m]
-    except:
-        import ipdb; ipdb.set_trace()
-        pass
-    loss = l_func(Y_vec[m] // N_vec[m]).view(-1, 1) * energy[m]
+    loss = l_func(Y_vec[m], N_vec[m]).view(-1, 1) * energy[m]
     assert loss.shape[1] == 1
 
     return loss.sum()
