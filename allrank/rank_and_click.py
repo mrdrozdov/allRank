@@ -127,9 +127,10 @@ def write_out_dir(path, role, out, dstore):
     new_out['knns'] = dstore.unique_x[new_out['knns'].reshape(-1)].reshape(*shape)
     #
     for k, v in new_out.items():
+        dtype = np.float32 if k == 'scores' else np.int
         new_path = os.path.join(path, 'out_{}_{}.npy'.format(role, k))
         print('writing {} with shape {}'.format(new_path, v.shape))
-        x = np.memmap(new_path, mode='w+', dtype=np.int, shape=v.shape)
+        x = np.memmap(new_path, mode='w+', dtype=dtype, shape=v.shape)
         x[:] = v
 
 
