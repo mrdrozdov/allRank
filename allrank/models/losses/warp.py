@@ -100,6 +100,15 @@ def warp(y_pred, y_true, padded_value_indicator=PADDED_Y_VALUE, weight_by_diff=F
         assert (rank > 0).all().item(), rank
         if mode == 'mean_rank':
             out = rank / Y_vec
+        elif mode == 'proportion':
+            out = N_vec.clone().fill_(1)
+        elif mode == 'precision':
+            alpha = torch.flip(torch.arange(0, 25, 8) / torch.arange(0, 25, 8).sum(), [-1])
+            pad = rank.max().item() - alpha.shape[-1]
+            if pad > 0:
+                alpha = torch.cat([alpha, torch.zeros(pad)], -1)
+            alpha = alpha.to(N_vec.device).cumsum(-1)
+            out = alpha[rank - 1]
         return out.detach()
 
     # TODO: What if mask is empty?
