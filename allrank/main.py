@@ -70,6 +70,8 @@ class Dstore:
             n_features -= 1 # query src
             n_features -= 1 # query tgt
             n_features -= 1 # key tgt
+            n_features -= 1 # p
+            n_features -= 1 # dist
         if not config.model.fc_model['ignore_q_feat']:
             n_features += self.vec_size # query vector
         if not config.model.fc_model['ignore_x_feat']:
@@ -172,9 +174,9 @@ class Dstore:
         return tmp
 
     def load(self, xb, qb):
-        x_id, q_src, q_tgt, x_tgt = torch.chunk(xb.long(), 4, dim=2)
-        xb = self.load_from_memmap(x_id, feat_type='x')
-        qb = self.load_from_memmap(qb, feat_type='q')
+        x_id, q_src, p, dist, q_tgt, x_tgt = torch.chunk(xb, 6, dim=2)
+        xb = self.load_from_memmap(x_id.long(), feat_type='x')
+        qb = self.load_from_memmap(qb.long(), feat_type='q')
         out = torch.cat([xb, qb, x_id.float(), q_src.float(), x_tgt.float()], -1)
         return out
 

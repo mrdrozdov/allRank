@@ -9,6 +9,7 @@ from .ordinal import *  # noqa F403 F401
 from .pointwise import *  # noqa F403 F401
 from .rankNet import *  # noqa F403 F401
 from .warp import *  # noqa F403 F401
+from .e2e import *  # noqa F403 F401
 from .bce import *  # noqa F403 F401
 
 from .new_pairwise import *
