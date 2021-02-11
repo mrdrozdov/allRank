@@ -81,8 +81,9 @@ class FCModel(nn.Module):
         :param x: input of shape [batch_size, slate_length, self.layers[0].in_features]
         :return: output of shape [batch_size, slate_length, self.output_size]
         """
-        q_src, x_tgt = x[:, :, -2].long(), x[:, :, -1].long()
-        feat = x[:, :, :-3]
+        x_id, q_src, p, dist, q_tgt, x_tgt = torch.chunk(x[:, :, -6:], 6, dim=2)
+        feat = x[:, :, :-6]
+        assert feat.shape[-1] == 2048, feat.shape
         x_feat, q_feat = torch.chunk(feat, 2, dim=-1)
         parts = []
         if not self.ignore_x_feat:
@@ -90,9 +91,9 @@ class FCModel(nn.Module):
         if not self.ignore_q_feat:
             parts.append(q_feat)
         if self.embed_q_src:
-            parts.append(self.embed(q_src))
+            parts.append(self.embed(q_src.long().squeeze(-1)))
         if self.embed_x_tgt:
-            parts.append(self.embed(x_tgt))
+            parts.append(self.embed(x_tgt.long().squeeze(-1)))
         x = torch.cat(parts, -1)
         x = self.input_norm(x)
         for layer in self.layers:

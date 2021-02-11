@@ -6,10 +6,11 @@ from torch.nn import BCEWithLogitsLoss
 from allrank.data.dataset_loading import PADDED_Y_VALUE
 
 
-def e2e(y_pred, y_true, padded_value_indicator=PADDED_Y_VALUE, weight_by_diff=False, weight_by_diff_powed=False, indices=None, mode='mean_rank', margin=0.01):
+def e2e(y_pred, y_true, model_input=None, padded_value_indicator=PADDED_Y_VALUE, weight_by_diff=False, weight_by_diff_powed=False, indices=None, mode='mean_rank', margin=0.01):
     """
     TODO: Add margin.
     """
+    x_id, q_src, p, dist, q_tgt, x_tgt = torch.chunk(model_input[:, :, -6:], 6, dim=2)
     y_pred = y_pred.clone()
     y_true = y_true.clone()
     B, K = y_true.shape

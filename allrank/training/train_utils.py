@@ -17,8 +17,10 @@ logger = get_logger()
 
 
 def loss_batch(model, loss_func, xb, yb, indices, gradient_clipping_norm, opt=None):
+    # TODO: We need to include p, dist, and tgt here in order to compute knn_p.
+    # Optionally, we will want to compute knn_p from predicted scores instead of dist.
     mask = (yb == PADDED_Y_VALUE)
-    loss = loss_func(model(xb, mask, indices), yb, indices=indices)
+    loss = loss_func(model(xb, mask, indices), yb, model_input=xb, indices=indices)
 
     if opt is not None:
         loss.backward()
