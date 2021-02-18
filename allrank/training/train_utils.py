@@ -20,16 +20,17 @@ def loss_batch(model, loss_func, xb, yb, indices, gradient_clipping_norm, opt=No
     # TODO: We need to include p, dist, and tgt here in order to compute knn_p.
     # Optionally, we will want to compute knn_p from predicted scores instead of dist.
     mask = (yb == PADDED_Y_VALUE)
-    loss = loss_func(model(xb, mask, indices), yb, model_input=xb, indices=indices)
+    loss = loss_func(model(xb, mask, indices), yb, model_input=xb, model=model, indices=indices)
 
+    norm = None
     if opt is not None:
         loss.backward()
         if gradient_clipping_norm:
-            clip_grad_norm_(model.parameters(), gradient_clipping_norm)
+            norm = clip_grad_norm_(model.parameters(), gradient_clipping_norm)
         opt.step()
         opt.zero_grad()
 
-    return loss.item(), len(xb)
+    return loss.item(), len(xb), norm
 
 
 def metric_on_batch(metric, model, xb, yb, indices):
@@ -157,10 +158,12 @@ def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, 
 
         train_metrics = []
         train_losses, train_nums = [], []
+        train_norms = []
         for batch in tqdm(wrap_dl(train_dl, feature_func), desc='tr'):
             xb, yb, indices = batch
-            loss, num = loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
+            loss, num, norm = loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
                     gradient_clipping_norm, optimizer)
+            train_norms.append(norm.cpu().detach().view(1))
             train_losses.append(loss)
             train_nums.append(num)
             metric_dict = compute_metrics_one_batch(config.metrics, model, feature_func, batch, device)
@@ -180,7 +183,7 @@ def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, 
             val_losses, val_nums = [], []
             for batch in tqdm(wrap_dl(valid_dl, feature_func), desc='va'):
                 xb, yb, indices = batch
-                loss, num = loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
+                loss, num, _ = loss_batch(model, loss_func, xb.to(device=device), yb.to(device=device), indices.to(device=device),
                         gradient_clipping_norm)
                 val_losses.append(loss)
                 val_nums.append(num)
@@ -199,6 +202,8 @@ def fit(epochs, model, feature_func, loss_func, optimizer, scheduler, train_dl, 
             torch.save(model.state_dict(), os.path.join(output_dir, "model-epoch{}.pkl".format(epoch)))
 
         logger.info(epoch_summary(epoch, train_loss, val_loss, train_metrics, val_metrics))
+        train_norms = torch.cat(train_norms)
+        logger.info('max_norm = {:.4f}, mean_norm = {:.4f}'.format(train_norms.max(), train_norms.mean()))
 
         current_val_metric_value = val_metrics.get(config.val_metric)
         if scheduler:

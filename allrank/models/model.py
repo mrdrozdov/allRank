@@ -115,6 +115,7 @@ class LTRModel(nn.Module):
         self.input_layer = input_layer if input_layer else nn.Identity()
         self.encoder = encoder if encoder else first_arg_id
         self.output_layer = output_layer
+        self.coeff_layer = nn.Linear(1024, 1)
 
     def prepare_for_output(self, x, mask, indices):
         """

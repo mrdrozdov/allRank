@@ -84,12 +84,11 @@ class Dstore:
 
     def load_fetch(self, path, keys, index):
         m = hashlib.sha256()
-        m.update(str.encode('v0.0.4'))
         for x in index:
             m.update(str.encode('{}'.format(x)))
         data_hash = m.hexdigest()
 
-        cache_path = os.path.join(path, '{}.cache.npy'.format(data_hash))
+        cache_path = os.path.join(path, '{}.cache.v0_0_1.npy'.format(data_hash))
 
         print('cache source shape {}'.format(keys.shape))
 
